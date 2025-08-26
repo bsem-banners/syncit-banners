@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "groups": {
+      "$groupId": {
+        ".read": "auth != null && (root.child('groups').child($groupId).child('members').child(auth.uid).exists() || root.child('groups').child($groupId).child('admin').val() == auth.uid)",
+        ".write": "auth != null && (root.child('groups').child($groupId).child('admin').val() == auth.uid || root.child('groups').child($groupId).child('members').child(auth.uid).exists())"
+      }
+    },
+    "users": {
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId",
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    }
+  }
+}
