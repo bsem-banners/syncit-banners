@@ -45,27 +45,6 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-      - name: Create export options
-        script: |
-          cd ios
-          cat > exportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>ad-hoc</string>
-              <key>compileBitcode</key>
-              <false/>
-              <key>uploadBitcode</key>
-              <false/>
-              <key>uploadSymbols</key>
-              <false/>
-              <key>signingStyle</key>
-              <string>automatic</string>
-          </dict>
-          </plist>
-          EOF
       - name: Build iOS app
         script: |
           cd ios
@@ -79,14 +58,14 @@ workflows:
             -destination generic/platform=iOS \
             -archivePath $CM_BUILD_DIR/app.xcarchive \
             archive
-      - name: Export development IPA
+      - name: Export development app
         script: |
-          xcodebuild -exportArchive \
-            -archivePath $CM_BUILD_DIR/app.xcarchive \
-            -exportPath $CM_BUILD_DIR/export \
-            -exportOptionsPlist ios/exportOptions.plist
+          cd ios
+          find $CM_BUILD_DIR -name "*.app" -type d
+          mkdir -p $CM_BUILD_DIR/export
+          cp -r $CM_BUILD_DIR/app.xcarchive/Products/Applications/*.app $CM_BUILD_DIR/export/
     artifacts:
-      - export/*.ipa
+      - export/*.app
     publishing:
       email:
         recipients:
