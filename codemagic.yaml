@@ -53,32 +53,29 @@ workflows:
           xcodebuild -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Debug \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
             -destination generic/platform=iOS \
-            -archivePath $CM_BUILD_DIR/app.xcarchive \
-            archive
+            -derivedDataPath ./build \
+            build
       - name: Export development app
         script: |
-          echo "Searching for .app files..."
-          find $CM_BUILD_DIR -name "*.app" -type d
-          echo "Archive contents:"
-          ls -la $CM_BUILD_DIR/app.xcarchive/
-          echo "Products directory:"
-          ls -la $CM_BUILD_DIR/app.xcarchive/Products/ || echo "No Products directory"
-          echo "Applications directory:"
-          ls -la $CM_BUILD_DIR/app.xcarchive/Products/Applications/ || echo "No Applications directory"
+          cd ios
+          echo "Searching for built .app files..."
+          find ./build -name "*.app" -type d
           
           # Create export directory
           mkdir -p $CM_BUILD_DIR/export
           
-          # Find and copy the actual .app file wherever it is
-          APP_FILE=$(find $CM_BUILD_DIR -name "*.app" -type d | head -n 1)
+          # Find and copy the .app file
+          APP_FILE=$(find ./build -name "*.app" -type d | head -n 1)
           if [ -n "$APP_FILE" ]; then
             echo "Found app at: $APP_FILE"
             cp -r "$APP_FILE" $CM_BUILD_DIR/export/
+            echo "App copied to export directory"
+            ls -la $CM_BUILD_DIR/export/
           else
             echo "No .app file found!"
+            echo "Build directory contents:"
+            ls -la ./build/
             exit 1
           fi
     artifacts:
