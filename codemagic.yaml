@@ -7,7 +7,7 @@ workflows:
         - expo_credentials
       vars:
         EXPO_TOKEN: $EXPO_TOKEN
-      node: 18.17.0
+      node: 20.19.4
       xcode: latest
       cocoapods: default
     cache:
