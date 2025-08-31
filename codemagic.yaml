@@ -3,10 +3,6 @@ workflows:
     name: iOS Development Build
     max_build_duration: 120
     environment:
-      groups:
-        - expo_credentials
-      vars:
-        EXPO_TOKEN: $EXPO_TOKEN
       node: 20.19.4
       xcode: latest
       cocoapods: default
@@ -17,13 +13,19 @@ workflows:
     scripts:
       - name: Install dependencies
         script: |
-          npm ci
-          npm install expo@53.0.20
-          npm install -g @expo/cli
-          npx expo --version
-      - name: Expo prebuild
+          npm install --force
+          npm list expo
+      - name: Install Expo CLI
         script: |
-          npx expo prebuild --platform ios --no-install
+          npm install -g @expo/cli@latest
+      - name: Verify setup
+        script: |
+          npx expo --version
+          node -v
+          npm -v
+      - name: Prebuild iOS
+        script: |
+          npx expo prebuild --platform ios --clear --no-install
       - name: Set up code signing
         script: |
           keychain initialize
