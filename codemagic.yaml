@@ -1,0 +1,49 @@
+workflows:
+  ios-development:
+    name: iOS Development Build
+    max_build_duration: 120
+    environment:
+      groups:
+        - expo_credentials
+      vars:
+        EXPO_TOKEN: $EXPO_TOKEN
+      node: 18.17.0
+      xcode: latest
+      cocoapods: default
+    cache:
+      cache_paths:
+        - $HOME/.npm
+        - node_modules
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm install
+          npm install -g @expo/cli
+      - name: Expo prebuild
+        script: |
+          npx expo prebuild --platform ios --no-install
+      - name: Set up code signing
+        script: |
+          keychain initialize
+      - name: Build iOS app
+        script: |
+          xcodebuild -workspace ios/*.xcworkspace \
+            -scheme * \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            -destination generic/platform=iOS \
+            -archivePath $CM_BUILD_DIR/app.xcarchive \
+            archive
+      - name: Export development IPA
+        script: |
+          xcodebuild -exportArchive \
+            -archivePath $CM_BUILD_DIR/app.xcarchive \
+            -exportPath $CM_BUILD_DIR/export \
+            -exportOptionsPlist ios/export_options.plist
+    artifacts:
+      - export/*.ipa
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
