@@ -32,15 +32,21 @@ workflows:
           mv app.json.backup app.json
       - name: Manually add Firebase to AppDelegate
         script: |
-          echo "import FirebaseCore" >> ios/*/AppDelegate.swift
-          echo "FirebaseApp.configure()" >> ios/*/AppDelegate.swift
+          cd ios
+          WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
+          PROJECT_NAME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "import FirebaseCore" >> "$PROJECT_NAME/AppDelegate.swift"
+          echo "FirebaseApp.configure()" >> "$PROJECT_NAME/AppDelegate.swift"
       - name: Set up code signing
         script: |
           keychain initialize
       - name: Build iOS app
         script: |
-          xcodebuild -workspace ios/*.xcworkspace \
-            -scheme * \
+          cd ios
+          WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | grep -A 100 "Schemes:" | grep -v "Schemes:" | head -n 1 | xargs)
+          xcodebuild -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
             -configuration Debug \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
@@ -52,7 +58,7 @@ workflows:
           xcodebuild -exportArchive \
             -archivePath $CM_BUILD_DIR/app.xcarchive \
             -exportPath $CM_BUILD_DIR/export \
-            -exportOptionsPlist ios/export_options.plist
+            -exportOptionsPlist ios/*/exportOptions.plist
     artifacts:
       - export/*.ipa
     publishing:
