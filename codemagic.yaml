@@ -30,40 +30,11 @@ workflows:
           sed -i 's/"@react-native-firebase\/messaging",//g' app.json
           npx expo prebuild --platform ios
           mv app.json.backup app.json
-      - name: Fix Podfile for Firebase Swift pods
+      - name: Fix Podfile for Firebase
         script: |
           cd ios
-          cat << 'EOF' > Podfile.new
-use_modular_headers!
-
-platform :ios, '15.1'
-prepare_react_native_project!
-
-linkage = ENV['USE_FRAMEWORKS']
-if linkage != nil
-  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
-  use_frameworks! :linkage => linkage.to_sym
-end
-
-target 'SynciTMobile' do
-  config = use_native_modules!
-  use_react_native!(
-    :path => config[:reactNativePath],
-    :hermes_enabled => true,
-    :fabric_enabled => false,
-    :app_clip => false
-  )
-
-  post_install do |installer|
-    react_native_post_install(
-      installer,
-      config[:reactNativePath],
-      :mac_catalyst_enabled => false
-    )
-  end
-end
-EOF
-          mv Podfile.new Podfile
+          sed -i '1i use_modular_headers!' Podfile
+          sed -i '2i use_frameworks! :linkage => :static' Podfile
       - name: Install CocoaPods dependencies
         script: |
           cd ios
