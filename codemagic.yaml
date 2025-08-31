@@ -18,6 +18,7 @@ workflows:
       - name: Install dependencies
         script: |
           npm ci
+          npm install expo@53.0.20
           npm install -g @expo/cli
           npx expo --version
       - name: Expo prebuild
