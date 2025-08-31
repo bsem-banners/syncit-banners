@@ -59,38 +59,34 @@ workflows:
       - name: Export development app
         script: |
           cd ios
-          echo "Searching in Build directory..."
-          find ./build/Build -name "*.app" -type d 2>/dev/null || echo "No .app in Build directory"
-          
-          echo "Searching entire build tree..."
-          find ./build -name "*.app" -type d -exec ls -la {} \;
-          
-          echo "Looking for Products directory..."
-          find ./build -name "Products" -type d -exec ls -la {} \;
-          
-          echo "Build/Products contents:"
-          ls -la ./build/Build/Products/ 2>/dev/null || echo "No Build/Products directory"
-          
-          echo "Intermediates contents:"
-          find ./build/Build/Intermediates* -name "*.app" -type d 2>/dev/null || echo "No .app in Intermediates"
-          
-          # Try to find any executable or bundle
-          echo "Looking for any iOS build products..."
-          find ./build -name "*SynciTMobile*" -type d
-          
-          # Create export directory anyway
+          # Create export directory
           mkdir -p $CM_BUILD_DIR/export
           
-          # Look for the actual build product
-          APP_FILE=$(find ./build -name "*.app" -type d | head -n 1)
-          if [ -n "$APP_FILE" ]; then
-            echo "Found app at: $APP_FILE"
-            cp -r "$APP_FILE" $CM_BUILD_DIR/export/
+          # Look for the built app in the most likely location
+          if [ -d "./build/Build/Products/Debug-iphoneos/SynciTMobile.app" ]; then
+            echo "Found app in Debug-iphoneos directory"
+            cp -r "./build/Build/Products/Debug-iphoneos/SynciTMobile.app" $CM_BUILD_DIR/export/
           else
-            echo "Still no .app file found, checking if build actually succeeded..."
-            echo "Checking for any build products:"
-            find ./build -name "*" -type f | grep -i syncit | head -10
+            # Search for any .app file in the build output
+            APP_FILE=$(find ./build -name "*.app" -type d | head -n 1)
+            if [ -n "$APP_FILE" ]; then
+              echo "Found app at: $APP_FILE"
+              cp -r "$APP_FILE" $CM_BUILD_DIR/export/
+            else
+              # If no .app found, look for the build product directory
+              PRODUCTS_DIR=$(find ./build -path "*/Products/*" -name "SynciTMobile*" -type d | head -n 1)
+              if [ -n "$PRODUCTS_DIR" ]; then
+                echo "Found build product at: $PRODUCTS_DIR"
+                cp -r "$PRODUCTS_DIR" $CM_BUILD_DIR/export/
+              else
+                echo "No app found, listing all build products:"
+                find ./build -name "SynciT*" -type d
+              fi
+            fi
           fi
+          
+          echo "Export directory contents:"
+          ls -la $CM_BUILD_DIR/export/
     artifacts:
       - export/*.app
     publishing:
