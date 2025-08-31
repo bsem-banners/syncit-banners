@@ -25,7 +25,7 @@ workflows:
           npm -v
       - name: Prebuild iOS
         script: |
-          npx expo prebuild --platform ios --clear --no-install
+          npx expo prebuild --platform ios
       - name: Set up code signing
         script: |
           keychain initialize
