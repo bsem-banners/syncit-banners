@@ -33,10 +33,17 @@ workflows:
       - name: Manually add Firebase to AppDelegate
         script: |
           cd ios
-          WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
-          PROJECT_NAME=$(basename "$WORKSPACE" .xcworkspace)
-          echo "import FirebaseCore" >> "$PROJECT_NAME/AppDelegate.swift"
-          echo "FirebaseApp.configure()" >> "$PROJECT_NAME/AppDelegate.swift"
+          # Find the actual project directory and AppDelegate file
+          PROJECT_DIR=$(find . -name "AppDelegate.swift" -exec dirname {} \;)
+          if [ -n "$PROJECT_DIR" ]; then
+            echo "Found AppDelegate at: $PROJECT_DIR"
+            echo "import FirebaseCore" >> "$PROJECT_DIR/AppDelegate.swift"
+            echo "FirebaseApp.configure()" >> "$PROJECT_DIR/AppDelegate.swift"
+            cat "$PROJECT_DIR/AppDelegate.swift"
+          else
+            echo "AppDelegate.swift not found, listing ios directory:"
+            find . -name "*.swift" -type f
+          fi
       - name: Set up code signing
         script: |
           keychain initialize
