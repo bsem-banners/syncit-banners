@@ -33,8 +33,11 @@ workflows:
       - name: Fix Podfile for Firebase
         script: |
           cd ios
-          sed -i '1i use_modular_headers!' Podfile
-          sed -i '2i use_frameworks! :linkage => :static' Podfile
+          echo "use_modular_headers!" > Podfile.tmp
+          echo "use_frameworks! :linkage => :static" >> Podfile.tmp
+          echo "" >> Podfile.tmp
+          cat Podfile >> Podfile.tmp
+          mv Podfile.tmp Podfile
       - name: Install CocoaPods dependencies
         script: |
           cd ios
