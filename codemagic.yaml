@@ -23,9 +23,17 @@ workflows:
           npx expo --version
           node -v
           npm -v
-      - name: Prebuild iOS
+      - name: Prebuild iOS without Firebase
         script: |
+          cp app.json app.json.backup
+          sed -i 's/"@react-native-firebase\/app",//g' app.json
+          sed -i 's/"@react-native-firebase\/messaging",//g' app.json
           npx expo prebuild --platform ios
+          mv app.json.backup app.json
+      - name: Manually add Firebase to AppDelegate
+        script: |
+          echo "import FirebaseCore" >> ios/*/AppDelegate.swift
+          echo "FirebaseApp.configure()" >> ios/*/AppDelegate.swift
       - name: Set up code signing
         script: |
           keychain initialize
