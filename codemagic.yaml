@@ -30,23 +30,44 @@ workflows:
           sed -i 's/"@react-native-firebase\/messaging",//g' app.json
           npx expo prebuild --platform ios
           mv app.json.backup app.json
+      - name: Fix Podfile for Firebase Swift pods
+        script: |
+          cd ios
+          cat << 'EOF' > Podfile.new
+use_modular_headers!
+
+platform :ios, '15.1'
+prepare_react_native_project!
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+target 'SynciTMobile' do
+  config = use_native_modules!
+  use_react_native!(
+    :path => config[:reactNativePath],
+    :hermes_enabled => true,
+    :fabric_enabled => false,
+    :app_clip => false
+  )
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false
+    )
+  end
+end
+EOF
+          mv Podfile.new Podfile
       - name: Install CocoaPods dependencies
         script: |
           cd ios
           pod install
-      - name: Manually add Firebase to AppDelegate
-        script: |
-          cd ios
-          PROJECT_DIR=$(find . -name "AppDelegate.swift" -exec dirname {} \;)
-          if [ -n "$PROJECT_DIR" ]; then
-            echo "Found AppDelegate at: $PROJECT_DIR"
-            echo "import FirebaseCore" >> "$PROJECT_DIR/AppDelegate.swift"
-            echo "FirebaseApp.configure()" >> "$PROJECT_DIR/AppDelegate.swift"
-            cat "$PROJECT_DIR/AppDelegate.swift"
-          else
-            echo "AppDelegate.swift not found, listing ios directory:"
-            find . -name "*.swift" -type f
-          fi
       - name: Set up code signing
         script: |
           keychain initialize
