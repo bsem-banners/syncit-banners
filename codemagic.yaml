@@ -30,10 +30,13 @@ workflows:
           sed -i 's/"@react-native-firebase\/messaging",//g' app.json
           npx expo prebuild --platform ios
           mv app.json.backup app.json
+      - name: Install CocoaPods dependencies
+        script: |
+          cd ios
+          pod install
       - name: Manually add Firebase to AppDelegate
         script: |
           cd ios
-          # Find the actual project directory and AppDelegate file
           PROJECT_DIR=$(find . -name "AppDelegate.swift" -exec dirname {} \;)
           if [ -n "$PROJECT_DIR" ]; then
             echo "Found AppDelegate at: $PROJECT_DIR"
