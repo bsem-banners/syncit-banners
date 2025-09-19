@@ -1,9 +1,13 @@
+import { db } from '@/config/firebase';
+import ErrorHandler from '@/utils/ErrorHandler';
 import messaging from '@react-native-firebase/messaging';
-import { Alert, Linking, PermissionsAndroid, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import { doc, updateDoc } from 'firebase/firestore';
+import { Linking, PermissionsAndroid, Platform } from 'react-native';
 import Contacts from 'react-native-contacts';
 
 interface NotificationData {
-  type: 'event_added' | 'group_invite' | 'invite_accepted' | 'user_joined';
+  type: 'event_added' | 'group_invite' | 'invite_accepted' | 'user_joined' | 'new_event' | 'member_joined' | 'event_deleted';
   groupId?: string;
   groupName?: string;
   eventTitle?: string;
@@ -12,43 +16,101 @@ interface NotificationData {
 }
 
 class NotificationService {
-  static async initialize() {
+  static currentUserId: string | null = null;
+
+  static async setupNotificationChannel() {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'Default',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#3B82F6',
+        sound: 'default',
+        enableVibrate: true,
+        enableLights: true,
+        showBadge: true,
+      });
+
+      await Notifications.setNotificationChannelAsync('group-invites', {
+        name: 'Group Invites',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#3B82F6',
+        sound: 'default',
+        enableVibrate: true,
+        enableLights: true,
+        showBadge: true,
+      });
+
+      await Notifications.setNotificationChannelAsync('events', {
+        name: 'Events',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#3B82F6',
+        sound: 'default',
+        enableVibrate: true,
+        enableLights: true,
+        showBadge: true,
+      });
+    }
+  }
+
+  static async initialize(userId: string) {
+    console.log('Starting NotificationService.initialize()...');
+    this.currentUserId = userId;
+    
+    // Setup notification channels first
+    await this.setupNotificationChannel();
+    
+    // Configure notification behavior
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+    
     const hasPermission = await this.checkPermission();
+    console.log('Has notification permission:', hasPermission);
+    
     if (!hasPermission) {
-      console.log('Notification permission denied');
-      return;
+      console.log('Permission denied - requesting...');
+      const requested = await this.requestPermission();
+      console.log('Permission request result:', requested);
+      
+      if (!requested) {
+        console.log('Permission still denied after request');
+        return;
+      }
     }
     
+    console.log('Getting FCM token...');
     const token = await this.getToken();
+    console.log('FCM Token result:', token ? 'SUCCESS' : 'FAILED');
+    
     if (token) {
       console.log('FCM Token:', token);
-      await this.storeTokenInDatabase(token);
+      await this.storeTokenInDatabase(token, userId);
+      console.log('Setting up notification handlers...');
+      this.setupNotificationHandlers();
+      console.log('NotificationService initialization complete!');
+    } else {
+      console.log('Failed to get FCM token - notification setup aborted');
     }
-    
-    this.setupNotificationHandlers();
   }
 
   static async checkPermission() {
     try {
-      console.log('🔍 DEBUG: checkPermission() called...');
       const authStatus = await messaging().hasPermission();
-      console.log('🔍 DEBUG: messaging().hasPermission() returned:', authStatus);
-      
-      if (Platform.OS === 'android') {
-        console.log('🔍 DEBUG: Android authorization status constants:', {
-          DENIED: messaging.AuthorizationStatus.DENIED,
-          NOT_DETERMINED: messaging.AuthorizationStatus.NOT_DETERMINED,
-          AUTHORIZED: messaging.AuthorizationStatus.AUTHORIZED,
-          PROVISIONAL: messaging.AuthorizationStatus.PROVISIONAL
-        });
-      }
       
       const result = authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
                     authStatus === messaging.AuthorizationStatus.PROVISIONAL;
-      console.log('🔍 DEBUG: checkPermission() returning:', result);
       return result;
     } catch (error) {
-      console.error('🔍 DEBUG: Error checking messaging permission:', error);
+      console.error('Error checking messaging permission:', error);
       return false;
     }
   }
@@ -92,53 +154,31 @@ class NotificationService {
 
   static async checkAndRequestPermissions() {
     try {
-      console.log('🔍 DEBUG: Starting permission check process...');
-      console.log('🔍 DEBUG: Platform:', Platform.OS);
-      
-      // Check current notification permission status
       const hasNotificationPermission = await this.checkPermission();
-      console.log('🔍 DEBUG: checkPermission() returned:', hasNotificationPermission);
       
-      // Get raw permission status for debugging
-      if (Platform.OS === 'ios') {
-        const authStatus = await messaging().hasPermission();
-        console.log('🔍 DEBUG: Raw iOS permission status:', authStatus);
-        console.log('🔍 DEBUG: AuthorizationStatus values:', {
-          DENIED: messaging.AuthorizationStatus.DENIED,
-          NOT_DETERMINED: messaging.AuthorizationStatus.NOT_DETERMINED,
-          AUTHORIZED: messaging.AuthorizationStatus.AUTHORIZED,
-          PROVISIONAL: messaging.AuthorizationStatus.PROVISIONAL
-        });
-      }
-
       if (!hasNotificationPermission) {
-        console.log('🔍 DEBUG: Permission not granted, requesting...');
-        // Try to request permission
         const granted = await this.requestPermission();
-        console.log('🔍 DEBUG: Permission request result:', granted);
         
         if (!granted) {
-          // Permission denied - show alert to go to settings
-          Alert.alert(
-            'Notifications Disabled',
-            'To receive group invites and event updates, please enable notifications in your device settings.\\n\\nGo to Settings > SynciT > Notifications > Allow Notifications',
-            [
-              { text: 'Later', style: 'cancel' },
-              { 
-                text: 'Open Settings', 
-                onPress: () => this.openSettings() 
-              }
-            ]
+          // Silent handling - no alerts in production
+          ErrorHandler.handleSilentError(
+            new Error('Notifications permission denied'),
+            { 
+              action: 'permission_check', 
+              additionalData: { feature: 'notifications' } 
+            }
           );
           return false;
         }
-      } else {
-        console.log('🔍 DEBUG: Permission already granted, skipping request');
       }
 
       return hasNotificationPermission || true;
     } catch (error) {
-      console.error('🔍 DEBUG: Error in checkAndRequestPermissions:', error);
+      console.error('Error in checkAndRequestPermissions:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'check_permissions',
+        additionalData: { feature: 'notifications' }
+      });
       return false;
     }
   }
@@ -162,42 +202,49 @@ class NotificationService {
       }
     } catch (error) {
       console.error('Error requesting contacts permission:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'request_contacts_permission'
+      });
       return false;
     }
   }
 
   static async checkAndRequestContactsPermission() {
     try {
-      // For contacts, we'll try to request directly since there's no separate check method
       const granted = await this.requestContactsPermission();
       console.log('Contacts permission result:', granted);
       
       if (!granted) {
-        Alert.alert(
-          'Contacts Access Disabled',
-          'To find friends easily, please enable contacts access in your device settings.\n\nGo to Settings > SynciT > Contacts > Allow',
-          [
-            { text: 'Later', style: 'cancel' },
-            { 
-              text: 'Open Settings', 
-              onPress: () => this.openSettings() 
-            }
-          ]
+        ErrorHandler.handleSilentError(
+          new Error('Contacts permission denied'),
+          { 
+            action: 'permission_check', 
+            additionalData: { feature: 'contacts' } 
+          }
         );
       }
       
       return granted;
     } catch (error) {
       console.error('Error requesting contacts permission:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'check_contacts_permission'
+      });
       return false;
     }
   }
 
   static async openSettings() {
-    if (Platform.OS === 'ios') {
-      Linking.openURL('app-settings:');
-    } else {
-      Linking.openSettings();
+    try {
+      if (Platform.OS === 'ios') {
+        await Linking.openURL('app-settings:');
+      } else {
+        await Linking.openSettings();
+      }
+    } catch (error) {
+      ErrorHandler.handleSilentError(error, {
+        action: 'open_settings'
+      });
     }
   }
 
@@ -206,16 +253,25 @@ class NotificationService {
       return await messaging().getToken();
     } catch (error) {
       console.error('Error getting FCM token:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'get_fcm_token'
+      });
       return null;
     }
   }
 
-  static async storeTokenInDatabase(token: string) {
+  static async storeTokenInDatabase(token: string, userId: string) {
     try {
-      console.log('TODO: Store FCM token in database:', token);
-      // TODO: Implement DatabaseService.updateUserFCMToken(token) later
+      await updateDoc(doc(db, 'users', userId), {
+        fcmToken: token
+      });
+      console.log('FCM token stored in Firestore');
     } catch (error) {
       console.error('Error storing FCM token:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'store_fcm_token',
+        userId
+      });
     }
   }
 
@@ -234,28 +290,72 @@ class NotificationService {
     };
   }
 
+  static async showLocalNotification(title: string, body: string, data?: any) {
+    try {
+      console.log('📱 showLocalNotification called with:', { title, body, data });
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data,
+          sound: 'default',
+          priority: Notifications.AndroidNotificationPriority.MAX,
+        },
+        trigger: null,
+        identifier: `notification_${Date.now()}`,
+      });
+      
+      console.log('✅ Notification scheduled successfully');
+    } catch (error) {
+      console.error('❌ Error in showLocalNotification:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'show_local_notification'
+      });
+    }
+  }
+
   static setupNotificationHandlers() {
-    // Foreground messages
+    console.log('Setting up notification handlers...');
+    
+    // Foreground messages - show system notification
     messaging().onMessage(async remoteMessage => {
+      console.log('Foreground notification received:', remoteMessage);
+      console.log('🔔 Attempting to show local notification...');
+      
       const data = this.parseNotificationData(remoteMessage.data);
       
-      Alert.alert(
-        remoteMessage.notification?.title || 'SynciT',
-        remoteMessage.notification?.body || 'New notification',
-        [
-          {
-            text: 'View',
-            onPress: () => {
-              if (data) this.handleNotificationPress(data);
-            }
-          },
-          { text: 'Dismiss', style: 'cancel' }
-        ]
-      );
+      try {
+        // Show as system notification
+        await this.showLocalNotification(
+          remoteMessage.notification?.title || 'SynciT',
+          remoteMessage.notification?.body || 'New notification',
+          data
+        );
+        console.log('✅ Local notification scheduled successfully');
+      } catch (error) {
+        console.error('❌ Error showing local notification:', error);
+        ErrorHandler.handleSilentError(error, {
+          action: 'handle_foreground_message'
+        });
+      }
+    });
+
+    // Handle notification responses (when user taps notification)
+    Notifications.addNotificationResponseReceivedListener(response => {
+      console.log('Notification response received:', response);
+      const data = response.notification.request.content.data;
+      if (data) {
+        const parsedData = this.parseNotificationData(data as { [key: string]: string | object });
+        if (parsedData) {
+          this.handleNotificationPress(parsedData);
+        }
+      }
     });
 
     // Background/quit messages - app opened from notification
     messaging().onNotificationOpenedApp(remoteMessage => {
+      console.log('Background notification opened app:', remoteMessage);
       const data = this.parseNotificationData(remoteMessage.data);
       if (data) this.handleNotificationPress(data);
     });
@@ -265,82 +365,150 @@ class NotificationService {
       .getInitialNotification()
       .then(remoteMessage => {
         if (remoteMessage) {
+          console.log('Initial notification (app was quit):', remoteMessage);
           const data = this.parseNotificationData(remoteMessage.data);
           if (data) this.handleNotificationPress(data);
         }
       });
 
     // Token refresh handler
-    messaging().onTokenRefresh(token => {
-      this.storeTokenInDatabase(token);
+    messaging().onTokenRefresh(async token => {
+      console.log('FCM token refreshed');
+      if (this.currentUserId) {
+        await this.storeTokenInDatabase(token, this.currentUserId);
+      }
     });
   }
 
   static handleNotificationPress(data: NotificationData) {
+    console.log('Handling notification press:', data);
+    
     switch (data.type) {
       case 'group_invite':
         console.log('Navigate to group invitation:', data.groupId);
-        // TODO: Add navigation logic
+        // TODO: Add navigation logic to group invitation
         break;
       case 'event_added':
+      case 'new_event':
         console.log('Navigate to group with new event:', data.groupId);
-        // TODO: Add navigation logic
+        // TODO: Add navigation logic to group details
+        break;
+      case 'event_deleted':
+        console.log('Navigate to group - event was deleted:', data.groupId);
+        // TODO: Add navigation logic to group details
         break;
       case 'invite_accepted':
+      case 'member_joined':
         console.log('Navigate to group details:', data.groupId);
-        // TODO: Add navigation logic
+        // TODO: Add navigation logic to group details
         break;
       case 'user_joined':
         console.log('User joined app:', data.userId);
-        // TODO: Add navigation logic
+        // TODO: Add navigation logic or refresh logic
         break;
     }
   }
 
-  // Future notification sending methods
-  static async sendEventNotification(groupId: string, eventTitle: string, senderName: string) {
+  static async debugNotificationStatus() {
+    console.log('=== NOTIFICATION DEBUG ===');
+    
     try {
-      console.log('TODO: Send event notification:', { groupId, eventTitle, senderName });
-      // TODO: Implement DatabaseService.sendNotificationToGroup later
+      // Check expo-notifications permissions
+      const expoPermissions = await Notifications.getPermissionsAsync();
+      console.log('Expo notification permissions:', expoPermissions);
+      
+      // Check FCM permissions
+      const fcmPermissions = await messaging().hasPermission();
+      console.log('FCM permissions:', fcmPermissions);
+      
+      // Check Android version
+      console.log('Platform version:', Platform.Version);
+      
+      // Check if channels exist (Android only)
+      if (Platform.OS === 'android') {
+        try {
+          const channels = await Notifications.getNotificationChannelsAsync();
+          console.log('Notification channels:', channels);
+        } catch (error) {
+          console.log('Error getting channels:', error);
+        }
+      }
     } catch (error) {
-      console.error('Error sending event notification:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'debug_notification_status'
+      });
     }
+    
+    console.log('=== END DEBUG ===');
   }
 
-  static async sendGroupInviteNotification(userIds: string[], groupName: string, senderName: string) {
+  // Silent notification methods for production
+  static async sendGroupInviteNotification(groupName: string, senderName: string, userIds: string[]) {
     try {
-      console.log('TODO: Send group invite notification:', { userIds, groupName, senderName });
-      // TODO: When implementing the actual notification, use this format:
-      // `${senderName} invited you to join ${groupName}`
+      console.log('Sending group invite notification...', { groupName, senderName, userIds });
+      // Notification sending logic would go here in production
     } catch (error) {
       console.error('Error sending group invite notification:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'send_group_invite_notification',
+        additionalData: { groupName, senderName }
+      });
     }
   }
 
   static async sendInviteAcceptedNotification(groupId: string, acceptedUserName: string) {
     try {
-      console.log('TODO: Send invite accepted notification:', { groupId, acceptedUserName });
-      // TODO: Implement DatabaseService.sendNotificationToGroupAdmin later
+      console.log('Sending invite accepted notification...', { groupId, acceptedUserName });
+      // Notification sending logic would go here in production
     } catch (error) {
       console.error('Error sending invite accepted notification:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'send_invite_accepted_notification',
+        groupId,
+        additionalData: { acceptedUserName }
+      });
+    }
+  }
+
+  static async sendEventNotification(groupId: string, eventTitle: string, senderName: string) {
+    try {
+      console.log('Sending event notification...', { groupId, eventTitle, senderName });
+      // Notification sending logic would go here in production
+    } catch (error) {
+      console.error('Error sending event notification:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'send_event_notification',
+        groupId,
+        additionalData: { eventTitle, senderName }
+      });
     }
   }
 
   static async sendMemberLeftNotification(groupId: string, groupName: string, memberName: string) {
     try {
-      console.log('TODO: Send member left notification:', { groupId, groupName, memberName });
-      // TODO: Implement DatabaseService.sendNotificationToGroup later
+      console.log('Sending member left notification...', { groupId, groupName, memberName });
+      // Notification sending logic would go here in production
     } catch (error) {
       console.error('Error sending member left notification:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'send_member_left_notification',
+        groupId,
+        additionalData: { groupName, memberName }
+      });
     }
   }
 
   static async sendMemberRemovedNotification(groupId: string, groupName: string, memberName: string, adminName: string) {
     try {
-      console.log('TODO: Send member removed notification:', { groupId, groupName, memberName, adminName });
-      // TODO: Implement DatabaseService.sendNotificationToGroup later
+      console.log('Sending member removed notification...', { groupId, groupName, memberName, adminName });
+      // Notification sending logic would go here in production
     } catch (error) {
       console.error('Error sending member removed notification:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'send_member_removed_notification',
+        groupId,
+        additionalData: { groupName, memberName, adminName }
+      });
     }
   }
 }

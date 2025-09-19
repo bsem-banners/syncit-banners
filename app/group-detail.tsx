@@ -2,6 +2,7 @@ import GroupSpecificBanner from '@/components/GroupSpecificBanner';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Event as GroupEvent } from '@/contexts/GroupContext';
 import { useGroups } from '@/contexts/GroupContext';
+import ErrorHandler from '@/utils/ErrorHandler';
 import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
@@ -17,7 +18,6 @@ import {
 } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import {
-  Alert,
   Linking,
   RefreshControl,
   SafeAreaView,
@@ -36,13 +36,11 @@ export default function GroupDetailScreen() {
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [selectedMemberFilter, setSelectedMemberFilter] = useState('all');
   const [refreshKey, setRefreshKey] = useState(0);
-  const [showCallModal, setShowCallModal] = useState(false);
-  const [showMessageModal, setShowMessageModal] = useState(false);
-  const [selectedPhoneNumber, setSelectedPhoneNumber] = useState('');
   
   const [showDayEvents, setShowDayEvents] = useState(false);
   const [selectedDayEvents, setSelectedDayEvents] = useState<GroupEvent[]>([]);
   const [selectedDayDate, setSelectedDayDate] = useState<string>('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   const { getGroup, deleteEventFromGroup, markEventAsViewed, isEventNewForUser } = useGroups();
   const group = getGroup(parseInt(id as string));
@@ -87,38 +85,28 @@ export default function GroupDetailScreen() {
   };
 
   const handleCall = async (phoneNumber: string) => {
-    setSelectedPhoneNumber(phoneNumber);
-    setShowCallModal(true);
-  };
-
-  const handleMessage = async (phoneNumber: string) => {
-    setSelectedPhoneNumber(phoneNumber);
-    setShowMessageModal(true);
-  };
-
-  const executeCall = async (option: { name: string; url: string }) => {
-    setShowCallModal(false);
     try {
-      await Linking.openURL(option.url);
+      const cleanPhone = phoneNumber.replace(/\s/g, '');
+      await Linking.openURL(`tel:${cleanPhone}`);
     } catch (error) {
-      console.log(`Failed to open ${option.name}:`, error);
-      Alert.alert(
-        'App Not Available', 
-        `${option.name} is not installed or cannot handle this request. Please install the app or try another option.`
-      );
+      ErrorHandler.handleSilentError(error, {
+        action: 'make_call',
+        userId: user?.uid
+      });
+      setErrorMessage('Unable to make phone call.');
     }
   };
 
-  const executeMessage = async (option: { name: string; url: string }) => {
-    setShowMessageModal(false);
+  const handleMessage = async (phoneNumber: string) => {
     try {
-      await Linking.openURL(option.url);
+      const cleanPhone = phoneNumber.replace(/\s/g, '');
+      await Linking.openURL(`sms:${cleanPhone}`);
     } catch (error) {
-      console.log(`Failed to open ${option.name}:`, error);
-      Alert.alert(
-        'App Not Available', 
-        `${option.name} is not installed or cannot handle this request. Please install the app or try another option.`
-      );
+      ErrorHandler.handleSilentError(error, {
+        action: 'send_message',
+        userId: user?.uid
+      });
+      setErrorMessage('Unable to send message.');
     }
   };
 
@@ -126,26 +114,22 @@ export default function GroupDetailScreen() {
     if (!group) return;
     
     if (group.admin !== user?.uid && event.createdBy !== user?.uid) {
-      Alert.alert('Error', 'You can only delete events you created or if you are the group admin.');
+      setErrorMessage('You can only delete events you created or if you are the group admin.');
       return;
     }
 
-    Alert.alert(
-      'Delete Event',
-      `Are you sure you want to delete "${event.notes}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deleteEventFromGroup(group.id, event.id);
-            setShowDayEvents(false);
-            handleRefresh();
-          }
-        }
-      ]
-    );
+    try {
+      deleteEventFromGroup(group.id, event.id);
+      setShowDayEvents(false);
+      handleRefresh();
+    } catch (error) {
+      ErrorHandler.logError(error instanceof Error ? error : new Error(String(error)), {
+        action: 'delete_event',
+        screen: 'group_detail',
+        userId: user?.uid
+      });
+      setErrorMessage('Failed to delete event.');
+    }
   };
 
   const getEventTypeLabel = (type: string) => {
@@ -240,7 +224,6 @@ export default function GroupDetailScreen() {
             <Text style={styles.calendarMoreEvents}>+{dayEvents.length - 2}</Text>
           )}
           
-          {/* Single red dot in top-right corner of day if any events are new */}
           {hasNewEvents && (
             <View style={styles.dayNotificationDot} />
           )}
@@ -266,7 +249,7 @@ export default function GroupDetailScreen() {
             <View style={styles.headerButton}>
               <Users size={20} color="white" strokeWidth={2} />
             </View>
-            <Text style={styles.headerButtonHint}>Manage Group</Text>
+            <Text style={styles.headerButtonHint}>Group Details</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerButtonContainer}
@@ -279,6 +262,16 @@ export default function GroupDetailScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Error Display */}
+      {errorMessage && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+          <TouchableOpacity onPress={() => setErrorMessage('')} style={styles.errorDismiss}>
+            <Text style={styles.errorDismissText}>×</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <ScrollView 
         style={styles.content} 
@@ -422,7 +415,7 @@ export default function GroupDetailScreen() {
         </View>
       </ScrollView>
 
-      {/* Day Events Modal - Enhanced with Action Icons and Red Dots */}
+      {/* Day Events Modal */}
       {showDayEvents && (
         <View style={styles.modalOverlay}>
           <View style={styles.dayEventsModal}>
@@ -445,7 +438,7 @@ export default function GroupDetailScreen() {
             <ScrollView style={styles.dayEventsContent}>
               {selectedDayEvents.map((event) => {
                 const eventCreator = group?.members.find(m => m.id === event.createdBy);
-                const isMyEvent = event.createdBy === user?.uid;
+                const isMyEvent = event.createdBy === user?.uid || event.createdBy === 'you';
                 const canDelete = group?.admin === user?.uid || isMyEvent;
                 const isNewEvent = isEventNewForUser && isEventNewForUser(event);
 
@@ -479,7 +472,7 @@ export default function GroupDetailScreen() {
                       </View>
 
                       <View style={styles.eventActions}>
-                        {!isMyEvent && eventCreator && (
+                        {!isMyEvent && eventCreator && event.createdBy !== 'you' && (
                           <>
                             <TouchableOpacity
                               style={styles.actionIcon}
@@ -525,74 +518,6 @@ export default function GroupDetailScreen() {
                 );
               })}
             </ScrollView>
-          </View>
-        </View>
-      )}
-
-      {/* Call Options Modal */}
-      {showCallModal && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.optionsModal}>
-            <View style={styles.optionsHeader}>
-              <Text style={styles.optionsTitle}>Choose Calling Method</Text>
-              <Text style={styles.optionsSubtitle}>Call {selectedPhoneNumber} using:</Text>
-            </View>
-            
-            <View style={styles.optionsContent}>
-              {[
-                { name: 'Phone', url: `tel:${selectedPhoneNumber}` },
-                { name: 'WhatsApp Call', url: `whatsapp://call?phone=${selectedPhoneNumber}` },
-              ].map((option, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.optionButton}
-                  onPress={() => executeCall(option)}
-                >
-                  <Text style={styles.optionText}>{option.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => setShowCallModal(false)}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* Message Options Modal */}
-      {showMessageModal && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.optionsModal}>
-            <View style={styles.optionsHeader}>
-              <Text style={styles.optionsTitle}>Choose Messaging Method</Text>
-              <Text style={styles.optionsSubtitle}>Message {selectedPhoneNumber} using:</Text>
-            </View>
-            
-            <View style={styles.optionsContent}>
-              {[
-                { name: 'Messages (SMS)', url: `sms:${selectedPhoneNumber}` },
-                { name: 'WhatsApp', url: `whatsapp://send?phone=${selectedPhoneNumber}` },
-              ].map((option, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.optionButton}
-                  onPress={() => executeMessage(option)}
-                >
-                  <Text style={styles.optionText}>{option.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => setShowMessageModal(false)}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
           </View>
         </View>
       )}
@@ -1105,6 +1030,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#6B7280',
     marginBottom: 16,
+  },
+    errorDismiss: {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    padding: 8,
+    backgroundColor: 'transparent',
+  },
+  errorDismissText: {
+    fontSize: 18,
+    color: '#6B7280',
+    fontWeight: 'bold',
   },
   eventActions: {
     flexDirection: 'row',

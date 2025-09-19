@@ -1,16 +1,16 @@
 // components/GroupSpecificBanner.tsx
+import ErrorHandler from '@/utils/ErrorHandler';
 import { X } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Image,
-    Linking,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Dimensions,
+  Image,
+  Linking,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface GroupBannerConfig {
@@ -81,23 +81,31 @@ export default function GroupSpecificBanner({ groupId, onClose }: GroupSpecificB
               setImageLoadingStates(initialLoadingStates);
               setImageErrorStates({});
               
-              console.log('✅ Group banners updated:', activeBanners.length);
+              console.log('Group banners updated:', activeBanners.length);
             } else {
               setBanners([]);
-              console.log('🚫 No active group banners');
+              console.log('No active group banners');
             }
           } else {
             setBanners([]);
-            console.log('🚫 Group document not found');
+            console.log('Group document not found');
           }
           setLoading(false);
         }, (error) => {
-          console.error('❌ Group banner listener error:', error);
+          console.error('Group banner listener error:', error);
+          ErrorHandler.handleSilentError(error, {
+            action: 'group_banner_listener',
+            groupId: groupId.toString()
+          });
           setLoading(false);
         });
         
       } catch (error) {
-        console.error('❌ Error setting up group banner listener:', error);
+        console.error('Error setting up group banner listener:', error);
+        ErrorHandler.handleSilentError(error, {
+          action: 'setup_group_banner_listener',
+          groupId: groupId.toString()
+        });
         setLoading(false);
       }
     };
@@ -108,7 +116,7 @@ export default function GroupSpecificBanner({ groupId, onClose }: GroupSpecificB
     return () => {
       if (unsubscribe) {
         unsubscribe();
-        console.log('🧹 Group banner listener cleaned up');
+        console.log('Group banner listener cleaned up');
       }
     };
   }, [groupId]);
@@ -131,13 +139,24 @@ export default function GroupSpecificBanner({ groupId, onClose }: GroupSpecificB
       const canOpen = await Linking.canOpenURL(clickUrl);
       if (canOpen) {
         await Linking.openURL(clickUrl);
-        console.log('🔗 Opened group banner link:', clickUrl);
+        console.log('Opened group banner link:', clickUrl);
       } else {
-        Alert.alert('Error', 'Cannot open this link');
+        ErrorHandler.handleSilentError(
+          new Error('Cannot open banner link'),
+          {
+            action: 'open_group_banner_link',
+            groupId: groupId.toString(),
+            additionalData: { clickUrl }
+          }
+        );
       }
     } catch (error) {
-      console.error('❌ Error opening URL:', error);
-      Alert.alert('Error', 'Failed to open link');
+      console.error('Error opening URL:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'open_group_banner_url',
+        groupId: groupId.toString(),
+        additionalData: { clickUrl }
+      });
     }
   };
 
@@ -150,13 +169,21 @@ export default function GroupSpecificBanner({ groupId, onClose }: GroupSpecificB
   const handleImageLoad = (bannerIndex: number) => {
     setImageLoadingStates(prev => ({ ...prev, [bannerIndex]: false }));
     setImageErrorStates(prev => ({ ...prev, [bannerIndex]: false }));
-    console.log(`✅ Group banner ${bannerIndex} loaded successfully`);
+    console.log(`Group banner ${bannerIndex} loaded successfully`);
   };
 
   const handleImageError = (bannerIndex: number) => {
     setImageLoadingStates(prev => ({ ...prev, [bannerIndex]: false }));
     setImageErrorStates(prev => ({ ...prev, [bannerIndex]: true }));
-    console.error(`❌ Failed to load group banner ${bannerIndex}`);
+    console.error(`Failed to load group banner ${bannerIndex}`);
+    ErrorHandler.handleSilentError(
+      new Error('Group banner image failed to load'),
+      {
+        action: 'group_banner_image_error',
+        groupId: groupId.toString(),
+        additionalData: { bannerIndex }
+      }
+    );
   };
 
   // Don't show if loading or no banners

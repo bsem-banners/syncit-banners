@@ -1,11 +1,11 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useGroups } from '@/contexts/GroupContext';
 import NotificationService from '@/services/NotificationService';
+import ErrorHandler from '@/utils/ErrorHandler';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -40,6 +40,7 @@ export default function AddEventScreen() {
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [dayTypes, setDayTypes] = useState<Record<string, string>>({});
   const [eventNotes, setEventNotes] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   // Calendar helper functions
   const formatDateString = (date: Date): string => {
@@ -110,18 +111,20 @@ export default function AddEventScreen() {
   };
 
   const handleAddEvent = async () => {
+    setErrorMessage('');
+    
     if (selectedDates.length === 0) {
-      Alert.alert('Error', 'Please select at least one date for the event.');
+      setErrorMessage('Please select at least one date for the event.');
       return;
     }
 
     if (!groupId) {
-      Alert.alert('Error', 'No group selected.');
+      setErrorMessage('No group selected.');
       return;
     }
 
     if (!userProfile) {
-      Alert.alert('Error', 'User profile not found.');
+      setErrorMessage('User profile not found.');
       return;
     }
 
@@ -153,8 +156,12 @@ export default function AddEventScreen() {
 
       router.back();
     } catch (error) {
-      console.error('Error adding event:', error);
-      Alert.alert('Error', 'Failed to add event. Please try again.');
+      ErrorHandler.logError(error instanceof Error ? error : new Error(String(error)), {
+        action: 'add_event',
+        screen: 'add_event',
+        userId: user?.uid
+      });
+      setErrorMessage('Failed to add event. Please try again.');
     }
   };
 
@@ -182,6 +189,16 @@ export default function AddEventScreen() {
         <Text style={styles.headerTitle}>Add Event</Text>
         <View style={styles.headerSpacer} />
       </View>
+
+      {/* Error Display */}
+      {errorMessage && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+          <TouchableOpacity onPress={() => setErrorMessage('')} style={styles.errorDismiss}>
+            <Text style={styles.errorDismissText}>×</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <KeyboardAvoidingView 
         style={styles.content}
@@ -314,7 +331,10 @@ export default function AddEventScreen() {
             <TextInput
               style={styles.notesInput}
               value={eventNotes}
-              onChangeText={setEventNotes}
+              onChangeText={(text) => {
+                setEventNotes(text);
+                setErrorMessage('');
+              }}
               placeholder="What's happening? (Apply to all selected dates within one event)"
               placeholderTextColor="#9CA3AF"
               multiline
@@ -369,6 +389,30 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 28,
+  },
+  errorContainer: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#F87171',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  errorText: {
+    color: '#DC2626',
+    fontSize: 14,
+    flex: 1,
+  },
+  errorDismiss: {
+    padding: 4,
+  },
+  errorDismissText: {
+    color: '#DC2626',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
   content: {
     flex: 1,

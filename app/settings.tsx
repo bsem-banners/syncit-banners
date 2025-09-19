@@ -1,8 +1,9 @@
 import { useAuth } from '@/contexts/AuthContext';
 import NotificationService from '@/services/NotificationService';
+import ErrorHandler from '@/utils/ErrorHandler';
 import { router } from 'expo-router';
 import {
-  Alert,
+  Linking,
   Share as RNShare,
   SafeAreaView,
   ScrollView,
@@ -13,7 +14,24 @@ import {
 } from 'react-native';
 
 export default function SettingsScreen() {
-  const { userProfile, signOut, deleteAccount } = useAuth();
+  const { user, userProfile, signOut, deleteAccount } = useAuth();
+
+  const formatPhoneForDisplay = (phone: string, countryCode: string) => {
+    if (!phone || !countryCode) return phone;
+    
+    // Clean the phone number (remove any existing spaces or formatting)
+    const cleanPhone = phone.replace(/\s/g, '');
+    
+    // For all numbers, show: country code + space + first 4 digits + space + rest
+    if (cleanPhone.length >= 4) {
+      const first4 = cleanPhone.substring(0, 4);
+      const rest = cleanPhone.substring(4);
+      return `${countryCode} ${first4} ${rest}`;
+    }
+    
+    // If less than 4 digits, just show country code + phone
+    return `${countryCode} ${cleanPhone}`;
+  };
 
   const handleInviteFriends = async () => {
     const appStoreLink = 'https://apps.apple.com/app/syncit';
@@ -35,96 +53,98 @@ Join my groups and let's start planning!`;
       });
       
       if (result.action === RNShare.sharedAction) {
-        console.log('Successfully shared invite');
+        ErrorHandler.logEvent('app_invitation_shared_from_settings', {
+          userId: user?.uid
+        });
       }
-    } catch {
-      Alert.alert(
-        'Invite Friends',
-        'Share this message with your friends:\n\n' + message,
-        [
-          {
-            text: 'Copy Message',
-            onPress: async () => {
-              try {
-                Alert.alert('Message copied!', 'Paste it in your messaging app');
-              } catch {
-                Alert.alert('Error', 'Could not copy message');
-              }
-            }
-          },
-          { text: 'Close', style: 'cancel' }
-        ]
-      );
+    } catch (error) {
+      ErrorHandler.handleSilentError(error, {
+        action: 'share_app_invitation_from_settings',
+        userId: user?.uid
+      });
+    }
+  };
+
+  const handleContactUs = async () => {
+    const email = 'syncit.mobileapp@gmail.com';
+    const subject = 'SynciT App Support';
+    const url = `mailto:${email}?subject=${encodeURIComponent(subject)}`;
+    
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+        ErrorHandler.logEvent('contact_us_email_opened', {
+          userId: user?.uid
+        });
+      } else {
+        ErrorHandler.logEvent('contact_us_email_unavailable', {
+          userId: user?.uid
+        });
+      }
+    } catch (error) {
+      ErrorHandler.handleSilentError(error, {
+        action: 'open_contact_email',
+        userId: user?.uid
+      });
     }
   };
 
   const handleDeleteAccount = async () => {
-    Alert.alert(
-      'Delete Account',
-      `⚠️ WARNING: This will permanently delete:
-
-- Your profile and login details
-- All groups you created
-- All events you created
-- All your app data
-
-This action CANNOT be undone!`,
-      [
-        { text: 'Cancel', style: 'cancel' },
+    try {
+      await deleteAccount();
+      router.replace('/');
+    } catch (error: any) {
+      ErrorHandler.logError(
+        error instanceof Error ? error : new Error(String(error)),
         {
-          text: 'Delete Forever',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              console.log('Starting account deletion...');
-              await deleteAccount();
-              console.log('Account deletion completed');
-              
-              Alert.alert(
-                'Account Deleted',
-                'Your account and all data have been permanently deleted.',
-                [
-                  {
-                    text: 'OK',
-                    onPress: () => {
-                      router.replace('/');
-                    }
-                  }
-                ]
-              );
-            } catch (error: any) {
-              console.error('Delete account error:', error);
-              Alert.alert(
-                'Deletion Failed',
-                error.message || 'There was an error deleting your account. Please try again.'
-              );
-            }
-          }
+          action: 'delete_account',
+          userId: user?.uid
         }
-      ]
-    );
+      );
+    }
   };
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout? You will need to sign in again.',
-      [
-        { text: 'Cancel', style: 'cancel' },
+  const handleLogout = async () => {
+    try {
+      await signOut();
+    } catch (error) {
+      ErrorHandler.logError(
+        error instanceof Error ? error : new Error(String(error)),
         {
-          text: 'Logout',
-          style: 'default',
-          onPress: async () => {
-            try {
-              await signOut();
-              // Navigation will be handled automatically by AuthNavigator
-            } catch {
-              Alert.alert('Error', 'Failed to logout. Please try again.');
-            }
-          }
+          action: 'logout',
+          userId: user?.uid
         }
-      ]
-    );
+      );
+    }
+  };
+
+  const handleOpenNotificationSettings = () => {
+    try {
+      ErrorHandler.logEvent('notification_settings_opened', {
+        userId: user?.uid
+      });
+      NotificationService.openSettings();
+    } catch (error) {
+      ErrorHandler.handleSilentError(error, {
+        action: 'open_notification_settings',
+        userId: user?.uid
+      });
+    }
+  };
+
+  const handlePrivacyPolicyOpen = () => {
+    ErrorHandler.logEvent('privacy_policy_opened', {
+      userId: user?.uid
+    });
+    router.push('/privacy-policy' as any);
+  };
+
+  const handleTermsOfServiceOpen = () => {
+    ErrorHandler.logEvent('terms_of_service_opened', {
+      userId: user?.uid
+    });
+    router.push('/terms-of-service' as any);
   };
 
   return (
@@ -144,35 +164,51 @@ This action CANNOT be undone!`,
               </View>
               <View style={styles.profileDetails}>
                 <Text style={styles.profileName}>{userProfile?.name || 'User'}</Text>
-                <Text style={styles.profilePhone}>{userProfile?.phone || 'No phone'}</Text>
+                <Text style={styles.profilePhone}>
+                  {userProfile?.phone ? formatPhoneForDisplay(userProfile.phone, userProfile.countryCode) : 'No phone'}
+                </Text>
               </View>
             </View>
           </View>
         </View>
 
-        <View style={styles.actionsSection}>
-          <TouchableOpacity style={styles.actionItem} onPress={handleInviteFriends}>
-            <Text style={styles.actionTitle}>Invite Friends</Text>
-            <Text style={styles.actionSubtitle}>Share SynciT with friends and family</Text>
+        <View style={styles.settingsList}>
+          <TouchableOpacity style={styles.settingItem} onPress={handleOpenNotificationSettings}>
+            <Text style={styles.settingTitle}>Notifications and Contacts Permission</Text>
+            <Text style={styles.settingSubtitle}>Ensure both settings are enabled for correct app functioning</Text>
           </TouchableOpacity>
 
-          {/* Notification Settings */}
-          <TouchableOpacity style={styles.actionItem} onPress={() => NotificationService.openSettings()}>
-            <Text style={styles.actionTitle}>Notifications and Contacts Permission</Text>
-            <Text style={styles.actionSubtitle}>Ensure both settings are enabled for correct app functioning</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.dangerSection}>
-          <TouchableOpacity style={styles.dangerItem} onPress={handleLogout}>
-            <Text style={styles.actionTitle}>Logout</Text>
-            <Text style={styles.actionSubtitle}>Sign out of your account</Text>
+          <TouchableOpacity style={styles.settingItem} onPress={handlePrivacyPolicyOpen}>
+            <Text style={styles.settingTitle}>Privacy Policy</Text>
+            <Text style={styles.settingSubtitle}>Learn how we protect your data and privacy</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.dangerItem} onPress={handleDeleteAccount}>
+          <TouchableOpacity style={styles.settingItem} onPress={handleTermsOfServiceOpen}>
+            <Text style={styles.settingTitle}>Terms of Service</Text>
+            <Text style={styles.settingSubtitle}>Read our terms and conditions</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingItem} onPress={handleContactUs}>
+            <Text style={styles.settingTitle}>Contact Us</Text>
+            <Text style={styles.settingSubtitle}>syncit.mobileapp@gmail.com</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingItem} onPress={handleInviteFriends}>
+            <Text style={styles.settingTitle}>Invite Friends</Text>
+            <Text style={styles.settingSubtitle}>Share SynciT with friends and family</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingItem} onPress={handleLogout}>
+            <Text style={styles.settingTitle}>Logout</Text>
+            <Text style={styles.settingSubtitle}>Sign out of your account</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingItem} onPress={handleDeleteAccount}>
             <Text style={styles.dangerTitle}>Delete Account</Text>
-            <Text style={styles.dangerSubtitle}>Permanently delete your account and all data</Text>
+            <Text style={styles.settingSubtitle}>Permanently delete your account and all data</Text>
           </TouchableOpacity>
+
+          <View style={styles.footer} />
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -182,17 +218,17 @@ This action CANNOT be undone!`,
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: 'white',
   },
- header: {
-   backgroundColor: '#3B82F6',
-   paddingHorizontal: 16,
-   paddingVertical: 16,
-   paddingTop: 40,
-   flexDirection: 'row',
-   justifyContent: 'space-between',
-   alignItems: 'center',
- },
+  header: {
+    backgroundColor: '#3B82F6',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingTop: 40,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   headerTitle: {
     fontSize: 20,
     fontWeight: '600',
@@ -249,51 +285,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
-  actionsSection: {
-    marginBottom: 24,
+  settingsList: {
+    flex: 1,
   },
-  actionItem: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+  settingItem: {
+    paddingVertical: 16,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
   },
-  actionTitle: {
+  settingTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
+    color: '#3B82F6',
     marginBottom: 4,
   },
-  actionSubtitle: {
+  settingSubtitle: {
     fontSize: 14,
     color: '#6B7280',
-  },
-  dangerSection: {
-    marginTop: -22,
-  },
-  dangerItem: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#FEE2E2',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   dangerTitle: {
     fontSize: 16,
@@ -301,8 +310,7 @@ const styles = StyleSheet.create({
     color: '#DC2626',
     marginBottom: 4,
   },
-  dangerSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
+  footer: {
+    height: 80,
   },
 });

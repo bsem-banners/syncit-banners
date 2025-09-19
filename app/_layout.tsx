@@ -2,13 +2,18 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { GroupProvider } from '@/contexts/GroupContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import NotificationService from '@/services/NotificationService';
+import ErrorHandler from '@/utils/ErrorHandler';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { Text, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
+
+// Initialize error handling and Crashlytics
+ErrorHandler.initialize();
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -16,43 +21,60 @@ SplashScreen.preventAutoHideAsync();
 function AuthNavigator() {
   const { user, userProfile, loading } = useAuth();
 
-  // Request notification permission with proper handling for denied permissions
+  // Handle notification permissions
   useEffect(() => {
     const handleNotificationPermission = async () => {
       try {
         await NotificationService.checkAndRequestPermissions();
       } catch (error) {
-        console.error('Failed to handle notification permission:', error);
+        ErrorHandler.handleSilentError(error, {
+          action: 'request_notification_permission'
+        });
       }
     };
 
     handleNotificationPermission();
-  }, []); // Run once when app starts
+  }, []);
 
-  // Navigate immediately when auth is ready - moved before early return
+  // Navigate based on auth state
   useEffect(() => {
-    if (loading) return; // Don't navigate while loading
+    if (loading) return;
     
-    if (!user) {
-      router.replace('/' as any);
-    } else if (!user.emailVerified) {
-      router.replace('/' as any);
-    } else if (!userProfile?.profileCompleted) {
-      router.replace('/profile-setup' as any);
-    } else {
-      router.replace('/groups' as any);
+    try {
+      if (!user) {
+        router.replace('/' as any);
+      } else if (!user.emailVerified) {
+        router.replace('/' as any);
+      } else if (!userProfile?.profileCompleted) {
+        router.replace('/profile-setup' as any);
+      } else {
+        router.replace('/groups' as any);
+      }
+    } catch (error) {
+      ErrorHandler.handleSilentError(error, {
+        action: 'navigation_error',
+        screen: 'auth_navigator',
+        userId: user?.uid
+      });
     }
   }, [user, userProfile, loading]);
 
-  // Initialize notifications when user is authenticated and profile is complete
+  // Initialize notifications for authenticated users
   useEffect(() => {
     if (user && userProfile?.profileCompleted) {
-      console.log('Initializing notifications for authenticated user');
-      NotificationService.initialize();
+      try {
+        ErrorHandler.logEvent('notification_init_trigger', { userId: user.uid });
+        NotificationService.initialize(user.uid);
+      } catch (error) {
+        ErrorHandler.handleSilentError(error, {
+          action: 'notification_init_error',
+          userId: user.uid
+        });
+      }
     }
   }, [user, userProfile?.profileCompleted]);
 
-  // Show loading while auth is determining
+  // Show loading screen
   if (loading) {
     return (
       <View style={{ 
@@ -76,6 +98,8 @@ function AuthNavigator() {
     <Stack>
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="privacy-policy" options={{ headerShown: false }} />
+      <Stack.Screen name="terms-of-service" options={{ headerShown: false }} />
       <Stack.Screen name="profile-setup" options={{ headerShown: false }} />
       <Stack.Screen name="groups" options={{ headerShown: false }} />
       <Stack.Screen name="group-detail" options={{ headerShown: false }} />
@@ -99,17 +123,35 @@ export default function RootLayout() {
     }
   }, [loaded]);
 
+  // Handle any critical app-level errors
+  useEffect(() => {
+    const handleAppError = (error: ErrorEvent) => {
+      ErrorHandler.handleSilentError(new Error(error.message), {
+        action: 'app_level_error',
+        screen: 'root_layout'
+      });
+    };
+
+    // Only in development - production console is suppressed
+    if (__DEV__) {
+      window.addEventListener?.('error', handleAppError);
+      return () => window.removeEventListener?.('error', handleAppError);
+    }
+  }, []);
+
   if (!loaded) {
     return null;
   }
 
   return (
-    <AuthProvider>
-      <GroupProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <AuthNavigator />
-        </ThemeProvider>
-      </GroupProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <GroupProvider>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <AuthNavigator />
+          </ThemeProvider>
+        </GroupProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }

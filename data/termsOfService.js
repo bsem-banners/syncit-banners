@@ -1,8 +1,8 @@
 export const termsOfService = `
 # Terms of Service
 
-**Effective Date:** [10/07/2025]  
-**Last Updated:** [10/07/2025]
+**Effective Date:** [26/08/2025]  
+**Last Updated:** [26/08/2025]
 
 ## 1. Introduction
 
@@ -18,7 +18,7 @@ By creating an account, downloading, accessing, or using SynciT, you:
 ## 3. Description of Service
 
 SynciT is a group coordination and event planning application that allows users to:
-- Create and manage groups with friends and family
+- Create and manage groups 
 - Schedule and coordinate events
 - Share calendars within groups
 - Send notifications about group activities
@@ -156,13 +156,12 @@ You agree to indemnify and hold us harmless from claims arising from:
 - We may update these Terms periodically
 - Significant changes will be communicated with 30 days notice
 - Continued use after changes constitutes acceptance
-- Previous versions are available upon request
 
 ## 15. Dispute Resolution
 
 ### 15.1 General
 - We encourage resolving disputes informally first
-- Contact us at [support email] for assistance
+- Contact us at [syncit.mobileapp@gmail.com] for assistance
 
 ### 15.2 For US Users
 - Disputes are governed by [State] law
@@ -192,9 +191,9 @@ We may assign these Terms; you may not without our consent.
 
 For questions about these Terms, contact us at:
 
-**Email:** [legal@syncit.app]  
-**Address:** [Your Company Address]  
-**Support:** [support@syncit.app]
+**Email:** [syncit.mobileapp@gmail.com]  
+**Name:** [Boris Semanco]
+**Address:** [65 Whitebeam drive, Maidstone, ME174QY, Kent, United Kingdom]  
 
 ---
 

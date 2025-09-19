@@ -1,4 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext';
+import ErrorHandler from '@/utils/ErrorHandler';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -11,6 +12,8 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+
+ErrorHandler.initialize();
 
 export default function OnboardingScreen() {
   const { user, userProfile, loading } = useAuth();
@@ -36,12 +39,12 @@ export default function OnboardingScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
-        colors={['#3B82F6', '#8B5CF6']}
+        colors={['#67b3e2ff', '#7d438fff']}
         style={styles.gradient}
       >
         <View style={styles.content}>
           <Image 
-            source={require('../assets/images/syncit_small.png')}
+            source={require('../assets/images/icon.png')}
             style={styles.logo}
             resizeMode="contain"
           />
@@ -92,12 +95,12 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   logo: {
-    width: 70,
-    height: 70,
-    marginBottom: 0,
+    width: 80,
+    height: 80,
+    marginBottom: -7,
   },
   title: {
-    fontSize: 25,
+    fontSize: 24,
     fontWeight: 'bold',
     color: 'white',
     textAlign: 'center',
@@ -130,7 +133,7 @@ const styles = StyleSheet.create({
     right: 0,
   },
   getStartedButton: {
-    backgroundColor: '#3b83f624',
+    backgroundColor: '#3b83f601',
     paddingVertical: 16,
     borderRadius: 8,
   },

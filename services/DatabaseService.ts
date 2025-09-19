@@ -264,7 +264,39 @@ class DatabaseService {
     }
   }
 
-  // NEW: Contact-based user discovery
+  // Helper function to normalize phone numbers and generate all possible formats
+  static normalizePhoneNumber(phoneNumber: string): Set<string> {
+    const normalized = phoneNumber.replace(/\D/g, '');
+    const formats = new Set<string>();
+    
+    // Add original normalized number
+    formats.add(normalized);
+    
+    // UK number conversions
+    if (normalized.startsWith('0') && normalized.length === 11) {
+      // 07926111222 -> 447926111222
+      formats.add('44' + normalized.substring(1));
+    }
+    
+    if (normalized.startsWith('44') && normalized.length === 12) {
+      // 447926111222 -> 07926111222
+      formats.add('0' + normalized.substring(2));
+    }
+    
+    // US number conversions (optional - add if needed)
+    if (normalized.startsWith('1') && normalized.length === 11) {
+      // 17123456789 -> 7123456789
+      formats.add(normalized.substring(1));
+    }
+    
+    if (normalized.length === 10 && !normalized.startsWith('0')) {
+      // 7123456789 -> 17123456789 (US format)
+      formats.add('1' + normalized);
+    }
+    
+    return formats;
+  }
+
   static async getContactsAppUsers(): Promise<ContactUser[]> {
     try {
       // Check permission first
@@ -276,17 +308,20 @@ class DatabaseService {
 
       // Get device contacts
       const contacts = await Contacts.getAll();
-      const contactPhones = new Set<string>();
+      const contactPhoneMap = new Map<string, string>(); // normalized -> original display
       
-      // Extract and normalize phone numbers from contacts
+      // Extract and normalize phone numbers from contacts, keeping original format
       contacts.forEach(contact => {
         if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
           contact.phoneNumbers.forEach(phoneObj => {
-            // Normalize phone number (remove spaces, dashes, etc.)
-            const normalizedPhone = phoneObj.number.replace(/\D/g, '');
-            if (normalizedPhone.length >= 10) {
-              contactPhones.add(normalizedPhone);
-            }
+            // Get all possible normalized formats for matching
+            const phoneFormats = this.normalizePhoneNumber(phoneObj.number);
+            phoneFormats.forEach(format => {
+              if (format.length >= 10) {
+                // Map normalized format to original display format
+                contactPhoneMap.set(format, phoneObj.number);
+              }
+            });
           });
         }
       });
@@ -294,17 +329,44 @@ class DatabaseService {
       // Get all app users
       const allAppUsers = await this.getAllAppUsers();
       
-      // Filter app users who are in contacts
+      // Filter app users who are in contacts with comprehensive format matching
       const contactAppUsers = allAppUsers.filter(user => {
-        const userPhone = user.phone.replace(/\D/g, '');
-        return contactPhones.has(userPhone);
+        // Create full phone number from user data
+        const userFullPhone = (user.countryCode + user.phone).replace(/\D/g, '');
+        const userPhoneFormats = this.normalizePhoneNumber(userFullPhone);
+        
+        // Check if any user format matches any contact phone format
+        for (const userFormat of userPhoneFormats) {
+          if (contactPhoneMap.has(userFormat)) {
+            return true;
+          }
+        }
+        
+        return false;
       });
 
-      // Add isFromContacts flag
-      return contactAppUsers.map(user => ({
-        ...user,
-        isFromContacts: true
-      }));
+      // Return with original contact phone format for display
+      return contactAppUsers.map(user => {
+        // Find the original contact phone format for this user
+        const userFullPhone = (user.countryCode + user.phone).replace(/\D/g, '');
+        const userPhoneFormats = this.normalizePhoneNumber(userFullPhone);
+        
+        let originalContactPhone = user.countryCode + ' ' + user.phone; // fallback
+        
+        // Find the matching contact phone format
+        for (const userFormat of userPhoneFormats) {
+          if (contactPhoneMap.has(userFormat)) {
+            originalContactPhone = contactPhoneMap.get(userFormat)!;
+            break;
+          }
+        }
+        
+        return {
+          ...user,
+          phone: originalContactPhone, // Display exactly as saved in contacts
+          isFromContacts: true
+        };
+      });
 
     } catch (error) {
       console.error('Error getting contacts app users:', error);
@@ -329,37 +391,45 @@ class DatabaseService {
     }
   }
 
+  // UPDATED: Phone number search with comprehensive format matching
   static async searchUserByPhoneNumber(phoneNumber: string): Promise<ContactUser | null> {
     try {
-      // Normalize phone number
-      const normalizedPhone = phoneNumber.replace(/\D/g, '');
+      // Normalize the search input and get all possible formats
+      const searchFormats = this.normalizePhoneNumber(phoneNumber);
       
-      if (normalizedPhone.length < 10) {
+      // Need at least 10 digits for a valid phone number
+      const hasValidFormat = Array.from(searchFormats).some(format => format.length >= 10);
+      if (!hasValidFormat) {
         return null;
       }
 
-      // Search for user with this phone number
-      const usersRef = collection(db, 'users');
-      const snapshot = await getDocs(usersRef);
+      // Get all app users
+      const allAppUsers = await this.getAllAppUsers();
       
-      let foundUser = null;
-      snapshot.forEach((doc) => {
-        const data = doc.data() as DocumentData;
-        const userPhone = data.phone?.replace(/\D/g, '') || '';
+      // Search through all users for a match
+      for (const user of allAppUsers) {
+        if (!user.phone || !user.countryCode) continue;
         
-        if (userPhone === normalizedPhone) {
-          foundUser = {
-            id: doc.id,
-            name: data.name || '',
-            phone: data.phone || '',
-            email: data.email || '',
-            initials: data.initials || '',
-            isFromContacts: false
-          };
+        // Create full phone number from user data
+        const userFullPhone = (user.countryCode + user.phone).replace(/\D/g, '');
+        const userPhoneFormats = this.normalizePhoneNumber(userFullPhone);
+        
+        // Check if any search format matches any user format
+        for (const searchFormat of searchFormats) {
+          if (userPhoneFormats.has(searchFormat)) {
+            return {
+              id: user.id,
+              name: user.name,
+              phone: user.countryCode + ' ' + user.phone, // Display formatted
+              email: user.email || '',
+              initials: user.initials || '',
+              isFromContacts: false
+            };
+          }
         }
-      });
+      }
       
-      return foundUser;
+      return null;
     } catch (error) {
       console.error('Error searching user by phone number:', error);
       return null;

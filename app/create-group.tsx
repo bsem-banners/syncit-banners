@@ -2,11 +2,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useGroups } from '@/contexts/GroupContext';
 import DatabaseService from '@/services/DatabaseService';
 import NotificationService from '@/services/NotificationService';
+import ErrorHandler from '@/utils/ErrorHandler';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Check, MessageCircle, Phone, Trash2 } from 'lucide-react-native';
+import { Check, MessageCircle, Phone, Trash2 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
-  Alert, // ADD THIS
   FlatList,
   Linking,
   ScrollView,
@@ -15,11 +15,10 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// Type definitions
 interface AppUser {
   id: string;
   name: string;
@@ -27,6 +26,7 @@ interface AppUser {
   email: string;
   initials: string;
   isFromContacts?: boolean;
+  countryCode?: string;
 }
 
 interface Member {
@@ -41,12 +41,10 @@ interface Member {
 }
 
 export default function CreateGroupScreen() {
-  // Get route parameters
   const { id, mode } = useLocalSearchParams();
   const isEditMode = mode === 'edit' && id;
   const groupId = id ? parseInt(id as string) : null;
 
-  // Form state
   const { user, userProfile } = useAuth();
   const { createGroup, updateGroup, getGroup } = useGroups();
   const [groupName, setGroupName] = useState<string>('');
@@ -54,26 +52,24 @@ export default function CreateGroupScreen() {
   const [selectedUsers, setSelectedUsers] = useState<AppUser[]>([]);
   const [creating, setCreating] = useState(false);
 
-  // Edit mode states
   const [currentGroup, setCurrentGroup] = useState<any>(null);
   const [isUserAdmin, setIsUserAdmin] = useState(false);
   const [existingMembers, setExistingMembers] = useState<Member[]>([]);
 
-  // Contact-based users
   const [contactUsers, setContactUsers] = useState<AppUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
 
-  // Phone search
   const [phoneSearchQuery, setPhoneSearchQuery] = useState('');
   const [phoneSearchResult, setPhoneSearchResult] = useState<AppUser | null>(null);
   const [phoneSearching, setPhoneSearching] = useState(false);
   const [phoneSearched, setPhoneSearched] = useState(false);
 
-  // Load data on component mount
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
   useEffect(() => {
     const loadData = async () => {
       if (isEditMode && groupId) {
-        // Load group for edit
         const group = getGroup(groupId);
         if (group) {
           setCurrentGroup(group);
@@ -84,22 +80,24 @@ export default function CreateGroupScreen() {
         }
       }
       
-      // Load contact users
       try {
         setLoadingUsers(true);
         const users = await DatabaseService.getContactsAppUsers();
         
-        // In edit mode, filter out existing members
         if (isEditMode && currentGroup) {
           const existingMemberIds = currentGroup.members.map((m: Member) => m.id);
-          const filteredUsers = users.filter(user => !existingMemberIds.includes(user.id));
+          const filteredUsers = users.filter((user: any) => !existingMemberIds.includes(user.id));
           setContactUsers(filteredUsers);
         } else {
           setContactUsers(users);
         }
       } catch (error) {
-        console.error('Error loading contact users:', error);
-        Alert.alert('Error', 'Failed to load contacts');
+        ErrorHandler.logError(error instanceof Error ? error : new Error(String(error)), {
+          action: 'load_contacts',
+          screen: 'create_group',
+          userId: user?.uid
+        });
+        setErrorMessage('Failed to load contacts');
       } finally {
         setLoadingUsers(false);
       }
@@ -108,7 +106,11 @@ export default function CreateGroupScreen() {
     loadData();
   }, [isEditMode, groupId, getGroup, user?.uid, currentGroup]);
 
-  // Helper functions
+  const clearMessages = () => {
+    setErrorMessage('');
+    setSuccessMessage('');
+  };
+
   const getInitials = (name: string): string => {
     return name
       .split(' ')
@@ -132,25 +134,16 @@ export default function CreateGroupScreen() {
   const removeMember = (memberId: string) => {
     if (!isUserAdmin) return;
     
-    Alert.alert(
-      'Remove Member',
-      'Are you sure you want to remove this member from the group?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => {
-            setExistingMembers(prev => prev.filter(m => m.id !== memberId));
-          }
-        }
-      ]
-    );
+    const member = existingMembers.find(m => m.id === memberId);
+    if (member) {
+      setExistingMembers(prev => prev.filter(m => m.id !== memberId));
+      setSuccessMessage(`${member.name} removed from group`);
+    }
   };
 
   const searchByPhoneNumber = async () => {
     if (!phoneSearchQuery.trim()) {
-      Alert.alert('Error', 'Please enter a phone number');
+      setErrorMessage('Please enter a phone number');
       return;
     }
 
@@ -158,13 +151,34 @@ export default function CreateGroupScreen() {
       setPhoneSearching(true);
       setPhoneSearched(false);
       setPhoneSearchResult(null);
+      clearMessages();
 
-      const user = await DatabaseService.searchUserByPhoneNumber(phoneSearchQuery);
-      setPhoneSearchResult(user);
+      const normalizedSearchQuery = phoneSearchQuery.replace(/\D/g, '');
+      let user: any = null;
+      
+      user = await DatabaseService.searchUserByPhoneNumber(phoneSearchQuery);
+      
+      if (!user && normalizedSearchQuery.length >= 10) {
+        user = await DatabaseService.searchUserByPhoneNumber(normalizedSearchQuery);
+      }
+
+      setPhoneSearchResult(user as AppUser | null);
       setPhoneSearched(true);
+      
+      ErrorHandler.logEvent('phone_search_success', {
+        hasResult: !!user,
+        searchQuery: normalizedSearchQuery.substring(0, 5) + 'XXX'
+      });
+      
     } catch (error) {
-      console.error('Error searching phone number:', error);
-      Alert.alert('Error', 'Failed to search phone number');
+      ErrorHandler.logError(
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          action: 'search_phone_number',
+          userId: user?.uid
+        }
+      );
+      setErrorMessage('Failed to search phone number');
     } finally {
       setPhoneSearching(false);
     }
@@ -177,15 +191,7 @@ export default function CreateGroupScreen() {
 
     try {
       const appStoreLink = 'https://apps.apple.com/app/syncit';
-      const playStoreLink = 'https://play.google.com/store/apps/details?id=com.syncit';
-      
-      const inviteMessage = `Hey! I'm using SynciT to coordinate events with friends and family. It's super easy to plan group activities together! 
-
-📱 Download SynciT:
-iOS: ${appStoreLink}
-Android: ${playStoreLink}
-
-Join my groups and let's start planning!`;
+      const inviteMessage = `Hey! I'm using SynciT to coordinate events with friends and family. Download SynciT and join my groups!`;
 
       const result = await Share.share({
         message: inviteMessage,
@@ -194,60 +200,36 @@ Join my groups and let's start planning!`;
       });
       
       if (result.action === Share.sharedAction) {
-        console.log('Successfully shared invite');
-        Alert.alert(
-          'Invitation Shared!', 
-          `Invitation to join SynciT has been shared. You can add them to groups once they join the app.`,
-          [{ text: 'OK' }]
-        );
+        ErrorHandler.logEvent('app_invitation_shared');
+        setSuccessMessage('Invitation shared! You can add them to groups once they join the app.');
         setPhoneSearchQuery('');
         setPhoneSearchResult(null);
         setPhoneSearched(false);
       }
     } catch (error) {
-      console.error('Error sharing invitation:', error);
-      
-      const appStoreLink = 'https://apps.apple.com/app/syncit';
-      const playStoreLink = 'https://play.google.com/store/apps/details?id=com.syncit';
-      
-      const fallbackMessage = `Hey! I'm using SynciT to coordinate events with friends and family. It's super easy to plan group activities together! 
-
-📱 Download SynciT:
-iOS: ${appStoreLink}
-Android: ${playStoreLink}
-
-Join my groups and let's start planning!`;
-
-      Alert.alert(
-        'Invite Friends',
-        'Share this message with your friends:\n\n' + fallbackMessage,
-        [
-          {
-            text: 'Copy Message',
-            onPress: () => {
-              Alert.alert('Message copied!', 'Paste it in your messaging app');
-            }
-          },
-          { text: 'Close', style: 'cancel' }
-        ]
-      );
+      ErrorHandler.handleSilentError(error, {
+        action: 'share_app_invitation',
+        userId: user?.uid
+      });
+      setSuccessMessage('Share this message with your friends to invite them to SynciT!');
     }
   };
 
   const handleSaveGroup = async () => {
+    clearMessages();
+    
     if (!groupName.trim()) {
-      Alert.alert('Error', 'Please enter a group name');
+      setErrorMessage('Please enter a group name');
       return;
     }
 
     if (!userProfile) {
-      Alert.alert('Error', 'User profile not found');
+      setErrorMessage('User profile not found');
       return;
     }
 
-    // For create mode, require at least one member
     if (!isEditMode && selectedUsers.length === 0) {
-      Alert.alert('Error', 'Please select at least one member');
+      setErrorMessage('Please select at least one member');
       return;
     }
 
@@ -255,13 +237,11 @@ Join my groups and let's start planning!`;
       setCreating(true);
 
       if (isEditMode && currentGroup) {
-        // UPDATE MODE
         if (!isUserAdmin) {
-          Alert.alert('Error', 'Only group admin can modify group settings');
+          setErrorMessage('Only group admin can modify group settings');
           return;
         }
 
-        // Combine existing members with new selected users
         const newMembers = selectedUsers.map(selectedUser => ({
           id: selectedUser.id,
           name: selectedUser.name,
@@ -284,37 +264,29 @@ Join my groups and let's start planning!`;
 
         await updateGroup(currentGroup.id, updatedGroupData);
 
-        // Send notifications to newly added members
         if (selectedUsers.length > 0) {
-          const invitedUserIds = selectedUsers.map(user => user.id);
           await NotificationService.sendGroupInviteNotification(
-            invitedUserIds, 
-            updatedGroupData.name, 
-            userProfile.name
+            updatedGroupData.name,
+            userProfile.name,
+            selectedUsers.map(user => user.id)
           );
         }
 
-        Alert.alert(
-          'Group Updated!',
-          `"${updatedGroupData.name}" has been updated.`,
-          [{ text: 'OK', onPress: () => router.back() }]
-        );
+        setSuccessMessage(`"${updatedGroupData.name}" has been updated.`);
+        setTimeout(() => router.back(), 2000);
 
       } else {
-        // CREATE MODE
         const members: Member[] = [
-          // Add current user as admin with accepted status
           {
             id: user?.uid || 'current-user',
             name: userProfile.name,
             initials: getInitials(userProfile.name),
             phone: userProfile.phone,
-            role: 'admin',
+            role: 'admin' as const,
             joinedAt: new Date(),
             isOnline: true,
-            status: 'accepted'
+            status: 'accepted' as const
           },
-          // Add selected users as members with PENDING status
           ...selectedUsers.map(selectedUser => ({
             id: selectedUser.id,
             name: selectedUser.name,
@@ -338,38 +310,104 @@ Join my groups and let's start planning!`;
 
         await createGroup(groupData);
 
-        // Send notifications to invited members
         if (selectedUsers.length > 0) {
-          const invitedUserIds = selectedUsers.map(user => user.id);
           await NotificationService.sendGroupInviteNotification(
-            invitedUserIds, 
-            groupData.name, 
-            userProfile.name
+            groupData.name,
+            userProfile.name,
+            selectedUsers.map(user => user.id)
           );
         }
 
-        Alert.alert(
-          'Group Created!',
-          `"${groupData.name}" has been created with ${groupData.members.length} members.`,
-          [{ text: 'OK', onPress: () => router.back() }]
-        );
+        setSuccessMessage(`"${groupData.name}" has been created.`);
+        setTimeout(() => router.back(), 2000);
       }
     } catch (error) {
-      console.error('Error saving group:', error);
-      Alert.alert('Error', `Failed to ${isEditMode ? 'update' : 'create'} group. Please try again.`);
+      ErrorHandler.logError(error instanceof Error ? error : new Error(String(error)), {
+        action: isEditMode ? 'update_group' : 'create_group',
+        screen: 'create_group',
+        userId: user?.uid
+      });
+      setErrorMessage(`Failed to ${isEditMode ? 'update' : 'create'} group. Please try again.`);
     } finally {
       setCreating(false);
     }
   };
 
-  // For non-admin users in edit mode, show read-only view
+  const handleCall = async (phoneNumber: string) => {
+    try {
+      const cleanPhone = phoneNumber.replace(/\s/g, '');
+      await Linking.openURL(`tel:${cleanPhone}`);
+    } catch (error) {
+      ErrorHandler.handleSilentError(error, {
+        action: 'make_call',
+        userId: user?.uid
+      });
+      setErrorMessage('Unable to make phone call.');
+    }
+  };
+
+  const handleMessage = async (phoneNumber: string) => {
+    try {
+      const cleanPhone = phoneNumber.replace(/\s/g, '');
+      await Linking.openURL(`sms:${cleanPhone}`);
+    } catch (error) {
+      ErrorHandler.handleSilentError(error, {
+        action: 'send_message',
+        userId: user?.uid
+      });
+      setErrorMessage('Unable to send message.');
+    }
+  };
+
+  const renderUserItem = ({ item: user }: { item: AppUser }) => {
+    const isSelected = selectedUsers.find(u => u.id === user.id);
+    
+    return (
+      <TouchableOpacity
+        style={[styles.userItem, isSelected && styles.userItemSelected]}
+        onPress={() => toggleUserSelection(user)}
+      >
+        <View style={styles.userInfo}>
+          <View style={styles.userAvatar}>
+            <Text style={styles.userInitials}>
+              {user.initials || getInitials(user.name || '')}
+            </Text>
+          </View>
+          <View style={styles.userDetails}>
+            <Text style={styles.userName}>{user.name || 'Unknown'}</Text>
+            <View style={styles.userMeta}>
+              <Text style={styles.userPhone}>{user.phone || ''}</Text>
+              <Text style={styles.hasAppIndicator}>• On SynciT</Text>
+            </View>
+          </View>
+        </View>
+        {isSelected && <Check size={20} color="#3B82F6" />}
+      </TouchableOpacity>
+    );
+  };
+
+  const renderSelectedMember = ({ item: user }: { item: AppUser }) => (
+    <View style={styles.selectedMember}>
+      <View style={styles.selectedMemberAvatar}>
+        <Text style={styles.selectedMemberInitials}>
+          {user.initials || getInitials(user.name || '')}
+        </Text>
+      </View>
+      <Text style={styles.selectedMemberName}>{user.name || 'Unknown'}</Text>
+      <TouchableOpacity
+        style={styles.removeMemberButton}
+        onPress={() => toggleUserSelection(user)}
+      >
+        <Text style={styles.removeMemberText}>×</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Member-only view for non-admin users in edit mode
   if (isEditMode && !isUserAdmin) {
     return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
+      <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <ArrowLeft size={24} color="white" />
-          </TouchableOpacity>
           <Text style={styles.headerTitle}>Group Members</Text>
           <View style={{ width: 24 }} />
         </View>
@@ -389,10 +427,7 @@ Join my groups and let's start planning!`;
                 <View key={member.id}>
                   <View style={styles.memberItem}>
                     <View style={styles.userInfo}>
-                      <View style={[
-                        styles.userAvatar,
-                        member.role === 'admin' && styles.adminAvatar
-                      ]}>
+                      <View style={[styles.userAvatar, member.role === 'admin' && styles.adminAvatar]}>
                         <Text style={styles.userInitials}>{member.initials}</Text>
                       </View>
                       <View style={styles.userDetails}>
@@ -404,14 +439,16 @@ Join my groups and let's start planning!`;
                         </Text>
                       </View>
                     </View>
-                    <View style={styles.contactActions}>
-                      <TouchableOpacity style={styles.contactButton}>
-                        <Text style={styles.contactButtonText}>Call</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.contactButton}>
-                        <Text style={styles.contactButtonText}>Message</Text>
-                      </TouchableOpacity>
-                    </View>
+                    {member.id !== user?.uid && (
+                      <View style={styles.memberActions}>
+                        <TouchableOpacity style={styles.actionIcon} onPress={() => handleCall(member.phone)}>
+                          <Phone size={16} color="#3B82F6" />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.actionIcon} onPress={() => handleMessage(member.phone)}>
+                          <MessageCircle size={16} color="#3B82F6" />
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
                   {index < existingMembers.length - 1 && <View style={styles.separator} />}
                 </View>
@@ -423,104 +460,65 @@ Join my groups and let's start planning!`;
     );
   }
 
-  const handleCall = async (phoneNumber: string) => {
-    try {
-      await Linking.openURL(`tel:${phoneNumber}`);
-    } catch (error) {
-      console.error('Failed to make call:', error);
-      Alert.alert('Error', 'Unable to make phone call');
-    }
-  };
-
-  const handleMessage = async (phoneNumber: string) => {
-    try {
-      await Linking.openURL(`sms:${phoneNumber}`);
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      Alert.alert('Error', 'Unable to send message');
-    }
-  };
-
-  const renderUserItem = ({ item: user }: { item: AppUser }) => {
-    const isSelected = selectedUsers.find(u => u.id === user.id);
-    
-    return (
-      <TouchableOpacity
-        style={[
-          styles.userItem,
-          isSelected && styles.userItemSelected
-        ]}
-        onPress={() => toggleUserSelection(user)}
-      >
-        <View style={styles.userInfo}>
-          <View style={styles.userAvatar}>
-            <Text style={styles.userInitials}>
-              {user.initials || getInitials(user.name)}
-            </Text>
-          </View>
-          <View style={styles.userDetails}>
-            <Text style={styles.userName}>{user.name}</Text>
-            <View style={styles.userMeta}>
-              <Text style={styles.userPhone}>{user.phone}</Text>
-              <Text style={styles.hasAppIndicator}>• On SynciT</Text>
-            </View>
-          </View>
-        </View>
-        {isSelected && (
-          <Check size={20} color="#3B82F6" />
-        )}
-      </TouchableOpacity>
-    );
-  };
-
-  const renderSelectedMember = ({ item: user }: { item: AppUser }) => (
-    <View style={styles.selectedMember}>
-      <View style={styles.selectedMemberAvatar}>
-        <Text style={styles.selectedMemberInitials}>
-          {user.initials || getInitials(user.name)}
-        </Text>
-      </View>
-      <Text style={styles.selectedMemberName}>{user.name}</Text>
-      <TouchableOpacity
-        style={styles.removeMemberButton}
-        onPress={() => toggleUserSelection(user)}
-      >
-        <Text style={styles.removeMemberText}>×</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      {/* Header */}
+    <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>
-          {isEditMode ? 'Edit Group' : 'Create New Group'}
+          {isEditMode ? 'Group Details' : 'Create New Group'}
         </Text>
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Group Name */}
+      {/* Error Display */}
+      {errorMessage && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+          <TouchableOpacity onPress={clearMessages} style={styles.messageDismiss}>
+            <Text style={styles.errorDismissText}>×</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Success Display */}
+      {successMessage && (
+        <View style={styles.successContainer}>
+          <Text style={styles.successText}>{successMessage}</Text>
+          <TouchableOpacity onPress={clearMessages} style={styles.messageDismiss}>
+            <Text style={styles.successDismissText}>×</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scrollContainer}
+      >
         <View style={styles.section}>
           <Text style={styles.label}>Group Name</Text>
           <TextInput
             style={styles.textInput}
             value={groupName}
-            onChangeText={setGroupName}
+            onChangeText={(text) => {
+              setGroupName(text);
+              clearMessages();
+            }}
             placeholder="Enter group name"
             placeholderTextColor="#9CA3AF"
             maxLength={50}
           />
         </View>
 
-        {/* Group Description */}
         <View style={styles.section}>
           <Text style={styles.label}>Group Description (Optional)</Text>
           <TextInput
             style={[styles.textInput, styles.textArea]}
             value={groupDescription}
-            onChangeText={setGroupDescription}
+            onChangeText={(text) => {
+              setGroupDescription(text);
+              clearMessages();
+            }}
             placeholder="What's this group for?"
             placeholderTextColor="#9CA3AF"
             multiline
@@ -530,7 +528,6 @@ Join my groups and let's start planning!`;
           />
         </View>
 
-        {/* Existing Members (Edit Mode) */}
         {isEditMode && existingMembers.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.label}>Current Members ({existingMembers.length})</Text>
@@ -539,10 +536,7 @@ Join my groups and let's start planning!`;
                 <View key={member.id}>
                   <View style={styles.memberItem}>
                     <View style={styles.userInfo}>
-                      <View style={[
-                        styles.userAvatar,
-                        member.role === 'admin' && styles.adminAvatar
-                      ]}>
+                      <View style={[styles.userAvatar, member.role === 'admin' && styles.adminAvatar]}>
                         <Text style={styles.userInitials}>{member.initials}</Text>
                       </View>
                       <View style={styles.userDetails}>
@@ -555,31 +549,16 @@ Join my groups and let's start planning!`;
                       </View>
                     </View>
                     
-                    {/* Action Icons - Show for all members except current user */}
                     {member.id !== user?.uid && (
                       <View style={styles.memberActions}>
-                        {/* Call Icon */}
-                        <TouchableOpacity
-                          style={styles.actionIcon}
-                          onPress={() => handleCall(member.phone)}
-                        >
+                        <TouchableOpacity style={styles.actionIcon} onPress={() => handleCall(member.phone)}>
                           <Phone size={16} color="#3B82F6" />
                         </TouchableOpacity>
-                        
-                        {/* Message Icon */}
-                        <TouchableOpacity
-                          style={styles.actionIcon}
-                          onPress={() => handleMessage(member.phone)}
-                        >
+                        <TouchableOpacity style={styles.actionIcon} onPress={() => handleMessage(member.phone)}>
                           <MessageCircle size={16} color="#3B82F6" />
                         </TouchableOpacity>
-                        
-                        {/* Remove Icon - Only show if admin can remove this member */}
                         {isUserAdmin && member.role !== 'admin' && (
-                          <TouchableOpacity
-                            style={styles.actionIcon}
-                            onPress={() => removeMember(member.id)}
-                          >
+                          <TouchableOpacity style={styles.actionIcon} onPress={() => removeMember(member.id)}>
                             <Trash2 size={16} color="#DC2626" />
                           </TouchableOpacity>
                         )}
@@ -593,7 +572,6 @@ Join my groups and let's start planning!`;
           </View>
         )}
 
-        {/* Selected Members Preview */}
         {selectedUsers.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.label}>
@@ -610,32 +588,28 @@ Join my groups and let's start planning!`;
           </View>
         )}
 
-        {/* Add Members Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
             {isEditMode ? 'Add More Members' : 'Add Members'}
           </Text>
           
-          {/* Phone Number Search */}
           <View style={styles.subsection}>
-            <Text style={styles.sublabel}>
-              Find SynciT users by their phone number
-            </Text>
+            <Text style={styles.sublabel}>Find SynciT users by their phone number</Text>
             
             <View style={styles.phoneSearchContainer}>
               <TextInput
                 style={styles.phoneSearchInput}
                 value={phoneSearchQuery}
-                onChangeText={setPhoneSearchQuery}
+                onChangeText={(text) => {
+                  setPhoneSearchQuery(text);
+                  clearMessages();
+                }}
                 placeholder="Enter phone number..."
                 placeholderTextColor="#9CA3AF"
                 keyboardType="phone-pad"
               />
               <TouchableOpacity
-                style={[
-                  styles.searchButton,
-                  (!phoneSearchQuery.trim() || phoneSearching) && styles.searchButtonDisabled
-                ]}
+                style={[styles.searchButton, (!phoneSearchQuery.trim() || phoneSearching) && styles.searchButtonDisabled]}
                 onPress={searchByPhoneNumber}
                 disabled={!phoneSearchQuery.trim() || phoneSearching}
               >
@@ -645,7 +619,6 @@ Join my groups and let's start planning!`;
               </TouchableOpacity>
             </View>
 
-            {/* Phone Search Results */}
             {phoneSearched && (
               <View style={styles.phoneSearchResults}>
                 {phoneSearchResult ? (
@@ -653,12 +626,12 @@ Join my groups and let's start planning!`;
                     <View style={styles.foundUserInfo}>
                       <View style={styles.userAvatar}>
                         <Text style={styles.userInitials}>
-                          {phoneSearchResult.initials || getInitials(phoneSearchResult.name)}
+                          {phoneSearchResult.initials || getInitials(phoneSearchResult.name || '')}
                         </Text>
                       </View>
                       <View style={styles.userDetails}>
-                        <Text style={styles.userName}>{phoneSearchResult.name}</Text>
-                        <Text style={styles.userPhone}>{phoneSearchResult.phone}</Text>
+                        <Text style={styles.userName}>{phoneSearchResult.name || 'Unknown'}</Text>
+                        <Text style={styles.userPhone}>{phoneSearchResult.phone || ''}</Text>
                       </View>
                     </View>
                     <TouchableOpacity
@@ -672,30 +645,19 @@ Join my groups and let's start planning!`;
                   </View>
                 ) : (
                   <View style={styles.notFoundContainer}>
-                    <Text style={styles.notFoundText}>
-                      No SynciT user found with this phone number
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.inviteButton}
-                      onPress={sendInvitation}
-                    >
+                    <Text style={styles.notFoundText}>No SynciT user found with this phone number</Text>
+                    <TouchableOpacity style={styles.inviteButton} onPress={sendInvitation}>
                       <Text style={styles.inviteButtonText}>Send App Invitation</Text>
                     </TouchableOpacity>
-                    <Text style={styles.helpText}>
-                      Members can also be added later in the group
-                    </Text>
+                    <Text style={styles.helpText}>Members can also be added later in the group</Text>
                   </View>
                 )}
               </View>
             )}
           </View>
 
-          {/* From Contacts */}
           <View style={styles.subsection}>
-            <Text style={styles.sublabel}>
-              People in your contacts who use SynciT
-            </Text>
-
+            <Text style={styles.sublabel}>People in your contacts who use SynciT</Text>
             <View style={styles.usersList}>
               {loadingUsers ? (
                 <View style={styles.loadingContainer}>
@@ -714,9 +676,7 @@ Join my groups and let's start planning!`;
                   <Text style={styles.emptyStateText}>
                     {isEditMode ? 'No additional contacts using SynciT found' : 'No contacts using SynciT found'}
                   </Text>
-                  <Text style={styles.emptyStateSubtext}>
-                    Use phone search above to find users
-                  </Text>
+                  <Text style={styles.emptyStateSubtext}>Use phone search above to find users</Text>
                 </View>
               )}
             </View>
@@ -724,7 +684,6 @@ Join my groups and let's start planning!`;
         </View>
       </ScrollView>
 
-      {/* Save Button */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={[
@@ -765,6 +724,51 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: 'white',
     textAlign: 'center',
+  },
+  errorContainer: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#F87171',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  errorText: {
+    color: '#DC2626',
+    fontSize: 14,
+    flex: 1,
+  },
+  errorDismissText: {
+    color: '#DC2626',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  successContainer: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#10B981',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    margin: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  successText: {
+    color: '#059669',
+    fontSize: 14,
+    flex: 1,
+  },
+  successDismissText: {
+    color: '#059669',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  messageDismiss: {
+    padding: 4,
   },
   content: {
     flex: 1,
@@ -826,36 +830,6 @@ const styles = StyleSheet.create({
   userRole: {
     fontSize: 12,
     color: '#6B7280',
-  },
-  removeButton: {
-    backgroundColor: '#FEE2E2',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  removeButtonText: {
-    color: '#DC2626',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  contactActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  contactButton: {
-    backgroundColor: '#EFF6FF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
-  },
-  contactButtonText: {
-    color: '#2563EB',
-    fontSize: 12,
-    fontWeight: '500',
   },
   phoneSearchContainer: {
     flexDirection: 'row',
@@ -941,6 +915,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  scrollContainer: {
+    paddingBottom: 100,
   },
   selectedMembersList: {
     marginTop: 8,
@@ -1105,4 +1082,4 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
- });  
+});

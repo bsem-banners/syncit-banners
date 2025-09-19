@@ -1,11 +1,11 @@
 // components/DynamicImageBanner.tsx
 
 import BannerConfigService from '@/services/RemoteConfigService';
+import ErrorHandler from '@/utils/ErrorHandler';
 import { X } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   Image,
   Linking,
@@ -67,23 +67,29 @@ export default function DynamicImageBanner({ onClose }: DynamicImageBannerProps)
             if (config.show && config.imageUrl) {
               setBannerConfig(config);
               setIsVisible(true);
-              console.log('✅ Banner updated in real-time:', config);
+              console.log('Banner updated in real-time:', config);
             } else {
               setIsVisible(false);
-              console.log('🚫 Banner disabled via real-time update');
+              console.log('Banner disabled via real-time update');
             }
           } else {
             setIsVisible(false);
-            console.log('🚫 Banner document deleted');
+            console.log('Banner document deleted');
           }
           setLoading(false);
         }, (error) => {
-          console.error('❌ Banner listener error:', error);
+          console.error('Banner listener error:', error);
+          ErrorHandler.handleSilentError(error, {
+            action: 'banner_listener_error'
+          });
           setLoading(false);
         });
         
       } catch (error) {
-        console.error('❌ Error setting up banner listener:', error);
+        console.error('Error setting up banner listener:', error);
+        ErrorHandler.handleSilentError(error, {
+          action: 'setup_banner_listener'
+        });
         setLoading(false);
       }
     };
@@ -94,7 +100,7 @@ export default function DynamicImageBanner({ onClose }: DynamicImageBannerProps)
     return () => {
       if (unsubscribe) {
         unsubscribe();
-        console.log('🧹 Banner listener cleaned up');
+        console.log('Banner listener cleaned up');
       }
     };
   }, []);
@@ -106,32 +112,48 @@ export default function DynamicImageBanner({ onClose }: DynamicImageBannerProps)
       const canOpen = await Linking.canOpenURL(bannerConfig.clickUrl);
       if (canOpen) {
         await Linking.openURL(bannerConfig.clickUrl);
-        console.log('🔗 Opened banner link:', bannerConfig.clickUrl);
+        console.log('Opened banner link:', bannerConfig.clickUrl);
       } else {
-        Alert.alert('Error', 'Cannot open this link');
+        ErrorHandler.handleSilentError(
+          new Error('Cannot open banner link'),
+          {
+            action: 'open_banner_link',
+            additionalData: { clickUrl: bannerConfig.clickUrl }
+          }
+        );
       }
     } catch (error) {
-      console.error('❌ Error opening URL:', error);
-      Alert.alert('Error', 'Failed to open link');
+      console.error('Error opening URL:', error);
+      ErrorHandler.handleSilentError(error, {
+        action: 'open_banner_url',
+        additionalData: { clickUrl: bannerConfig.clickUrl }
+      });
     }
   };
 
   const handleClose = () => {
     setIsVisible(false);
-    console.log('❌ Banner closed by user');
+    console.log('Banner closed by user');
     onClose?.();
   };
 
   const handleImageLoad = () => {
     setImageLoading(false);
     setImageError(false);
-    console.log('✅ Banner image loaded successfully');
+    console.log('Banner image loaded successfully');
   };
 
   const handleImageError = () => {
     setImageLoading(false);
     setImageError(true);
-    console.error('❌ Failed to load banner image:', bannerConfig?.imageUrl);
+    console.error('Failed to load banner image:', bannerConfig?.imageUrl);
+    ErrorHandler.handleSilentError(
+      new Error('Banner image failed to load'),
+      {
+        action: 'banner_image_load_error',
+        additionalData: { imageUrl: bannerConfig?.imageUrl }
+      }
+    );
   };
 
   // Don't show if loading, not visible, no config, or image failed

@@ -1,32 +1,38 @@
 import { TestingUtils } from '@/utils/TestingUtils';
 import { useState } from 'react';
-import { Alert, Text, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function TestingScreen() {
   const [testGroupId, setTestGroupId] = useState<number | null>(null);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [isError, setIsError] = useState(false);
   
+  const showMessage = (message: string, error: boolean = false) => {
+    setStatusMessage(message);
+    setIsError(error);
+    setTimeout(() => setStatusMessage(''), 3000);
+  };
+
   const runTests = async () => {
     try {
-      // Create test group
       const group = await TestingUtils.createTestGroup();
       setTestGroupId(group.id);
-      Alert.alert('Success', 'Test group created');
+      showMessage('Test group created successfully');
       
-      // Test notifications
       await TestingUtils.testNotification();
       
     } catch (error) {
-      Alert.alert('Error', (error as Error).message || 'Unknown error occurred');
+      showMessage((error as Error).message || 'Unknown error occurred', true);
     }
   };
 
   const createMultipleGroups = async () => {
     try {
       const groups = await TestingUtils.createMultipleTestGroups();
-      Alert.alert('Success', `Created ${groups.length} test groups`);
+      showMessage(`Created ${groups.length} test groups successfully`);
     } catch (error) {
-      Alert.alert('Error', (error as Error).message || 'Unknown error occurred');
+      showMessage((error as Error).message || 'Unknown error occurred', true);
     }
   };
   
@@ -34,12 +40,12 @@ export default function TestingScreen() {
     if (testGroupId) {
       try {
         await TestingUtils.simulateEventCreation(testGroupId);
-        Alert.alert('Success', 'Test event created - check real-time updates!');
+        showMessage('Test event created - check real-time updates!');
       } catch (error) {
-        Alert.alert('Error', (error as Error).message || 'Unknown error occurred');
+        showMessage((error as Error).message || 'Unknown error occurred', true);
       }
     } else {
-      Alert.alert('Error', 'Please create a test group first');
+      showMessage('Please create a test group first', true);
     }
   };
 
@@ -47,116 +53,166 @@ export default function TestingScreen() {
     try {
       await TestingUtils.clearTestData();
       setTestGroupId(null);
-      Alert.alert('Success', 'Test data cleared');
+      showMessage('Test data cleared successfully');
     } catch (error) {
-      Alert.alert('Error', (error as Error).message || 'Unknown error occurred');
+      showMessage((error as Error).message || 'Unknown error occurred', true);
     }
   };
   
   return (
-    <SafeAreaView style={{ 
-      flex: 1, 
-      padding: 20, 
-      backgroundColor: '#F9FAFB' 
-    }}>
-      <Text style={{ 
-        fontSize: 24, 
-        fontWeight: 'bold', 
-        marginBottom: 30, 
-        textAlign: 'center',
-        color: '#111827'
-      }}>
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.title}>
         Real-time Testing
       </Text>
+
+      {/* Status Message Display */}
+      {statusMessage && (
+        <View style={[
+          styles.statusContainer,
+          isError ? styles.errorContainer : styles.successContainer
+        ]}>
+          <Text style={[
+            styles.statusText,
+            isError ? styles.errorText : styles.successText
+          ]}>
+            {statusMessage}
+          </Text>
+          <TouchableOpacity 
+            onPress={() => setStatusMessage('')} 
+            style={styles.statusDismiss}
+          >
+            <Text style={styles.statusDismissText}>×</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       
       <TouchableOpacity 
-        style={{
-          backgroundColor: '#3B82F6',
-          padding: 16,
-          borderRadius: 8,
-          marginBottom: 16
-        }}
+        style={styles.button}
         onPress={runTests}
       >
-        <Text style={{
-          color: 'white',
-          textAlign: 'center',
-          fontSize: 16,
-          fontWeight: '600'
-        }}>
+        <Text style={styles.buttonText}>
           Create Test Group
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity 
-        style={{
-          backgroundColor: '#10B981',
-          padding: 16,
-          borderRadius: 8,
-          marginBottom: 16
-        }}
+        style={[styles.button, styles.successButton]}
         onPress={createMultipleGroups}
       >
-        <Text style={{
-          color: 'white',
-          textAlign: 'center',
-          fontSize: 16,
-          fontWeight: '600'
-        }}>
+        <Text style={styles.buttonText}>
           Create Multiple Test Groups
         </Text>
       </TouchableOpacity>
       
       <TouchableOpacity 
-        style={{
-          backgroundColor: '#F59E0B',
-          padding: 16,
-          borderRadius: 8,
-          marginBottom: 16,
-          opacity: testGroupId ? 1 : 0.5
-        }}
+        style={[
+          styles.button, 
+          styles.warningButton,
+          { opacity: testGroupId ? 1 : 0.5 }
+        ]}
         onPress={simulateEvent}
         disabled={!testGroupId}
       >
-        <Text style={{
-          color: 'white',
-          textAlign: 'center',
-          fontSize: 16,
-          fontWeight: '600'
-        }}>
+        <Text style={styles.buttonText}>
           Simulate Real-time Event
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity 
-        style={{
-          backgroundColor: '#EF4444',
-          padding: 16,
-          borderRadius: 8,
-          marginBottom: 16
-        }}
+        style={[styles.button, styles.dangerButton]}
         onPress={clearTestData}
       >
-        <Text style={{
-          color: 'white',
-          textAlign: 'center',
-          fontSize: 16,
-          fontWeight: '600'
-        }}>
+        <Text style={styles.buttonText}>
           Clear Test Data
         </Text>
       </TouchableOpacity>
 
       {testGroupId && (
-        <Text style={{
-          fontSize: 14,
-          color: '#6B7280',
-          textAlign: 'center',
-          marginTop: 20
-        }}>
+        <Text style={styles.infoText}>
           Active Test Group ID: {testGroupId}
         </Text>
       )}
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1, 
+    padding: 20, 
+    backgroundColor: '#F9FAFB',
+  },
+  title: {
+    fontSize: 24, 
+    fontWeight: 'bold', 
+    marginBottom: 30, 
+    textAlign: 'center',
+    color: '#111827',
+  },
+  statusContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  successContainer: {
+    backgroundColor: '#D1FAE5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  errorContainer: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  statusText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  successText: {
+    color: '#059669',
+  },
+  errorText: {
+    color: '#DC2626',
+  },
+  statusDismiss: {
+    padding: 8,
+    backgroundColor: 'transparent',
+  },
+  statusDismissText: {
+    fontSize: 18,
+    color: '#6B7280',
+    fontWeight: 'bold',
+  },
+  button: {
+    backgroundColor: '#3B82F6',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  successButton: {
+    backgroundColor: '#10B981',
+  },
+  warningButton: {
+    backgroundColor: '#F59E0B',
+  },
+  dangerButton: {
+    backgroundColor: '#EF4444',
+  },
+  buttonText: {
+    color: 'white',
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 20,
+  },
+});

@@ -1,9 +1,8 @@
-import '@/config/firebase'; // Ensure Firebase is initialized
+import '@/config/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import NotificationService from '@/services/NotificationService';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -14,6 +13,89 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
+// International Phone Number Input Component
+interface PhoneNumberInputProps {
+  value: string;
+  onChangeText: (value: string) => void;
+}
+
+const PhoneNumberInput = ({ value, onChangeText }: PhoneNumberInputProps) => {
+  const [countryCode, setCountryCode] = useState('44');
+  const [phoneNumber, setPhoneNumber] = useState('');
+
+  useEffect(() => {
+    // Parse existing value if provided
+    if (value && value.startsWith('+')) {
+      const withoutPlus = value.substring(1);
+      if (withoutPlus.startsWith('44')) {
+        setCountryCode('44');
+        setPhoneNumber(withoutPlus.substring(2));
+      } else {
+        // Find country code (up to 3 digits)
+        const match = withoutPlus.match(/^(\d{1,3})(.*)$/);
+        if (match) {
+          setCountryCode(match[1]);
+          setPhoneNumber(match[2]);
+        }
+      }
+    }
+  }, [value]);
+
+  const handleCountryCodeChange = (text: string) => {
+    // Only allow digits, max 3 characters
+    const digits = text.replace(/\D/g, '').slice(0, 3);
+    setCountryCode(digits);
+    updateFullNumber(digits, phoneNumber);
+  };
+
+  const handlePhoneNumberChange = (text: string) => {
+    let digits = text.replace(/\D/g, '');
+    
+    // For UK (44), remove leading 0 if present
+    if (countryCode === '44' && digits.startsWith('0')) {
+      digits = digits.substring(1);
+    }
+    
+    // Limit phone number length
+    digits = digits.slice(0, 12);
+    setPhoneNumber(digits);
+    updateFullNumber(countryCode, digits);
+  };
+
+  const updateFullNumber = (code: string, number: string) => {
+    if (code && number) {
+      onChangeText(`+${code}${number}`);
+    } else {
+      onChangeText('');
+    }
+  };
+
+  return (
+    <View style={styles.phoneInputContainer}>
+      <View style={styles.prefixContainer}>
+        <Text style={styles.fixedPrefix}>00</Text>
+        <TextInput
+          style={styles.countryCodeInput}
+          value={countryCode}
+          onChangeText={handleCountryCodeChange}
+          placeholder="44"
+          placeholderTextColor="#9CA3AF"
+          keyboardType="numeric"
+          maxLength={3}
+        />
+      </View>
+      <TextInput
+        style={styles.phoneMainInput}
+        value={phoneNumber}
+        onChangeText={handlePhoneNumberChange}
+        placeholder={countryCode === '44' ? '7123456789' : 'Phone number'}
+        placeholderTextColor="#9CA3AF"
+        keyboardType="phone-pad"
+      />
+    </View>
+  );
+};
 
 export default function ProfileSetupScreen() {
   const { user, saveUserProfile, userProfile } = useAuth();
@@ -56,46 +138,49 @@ export default function ProfileSetupScreen() {
   };
 
   const isValidProfile = () => {
-    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    if (!phoneNumber || !phoneNumber.startsWith('+')) return false;
+    const withoutPlus = phoneNumber.substring(1);
+    const cleanPhone = withoutPlus.replace(/\D/g, '');
     return name.trim().length >= 2 && cleanPhone.length >= 10;
   };
 
   const handleContinue = async () => {
     if (!isValidProfile()) {
-      Alert.alert('Incomplete Profile', 'Please fill in all required fields');
+      console.warn('Incomplete profile data');
       return;
     }
 
     setLoading(true);
     try {
-      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      // Extract country code and phone number
+      const withoutPlus = phoneNumber.substring(1);
+      let countryCode = '';
+      let cleanPhone = '';
+
+      // For UK numbers (44), handle specifically
+      if (withoutPlus.startsWith('44')) {
+        countryCode = '+44';
+        cleanPhone = withoutPlus.substring(2); // Remove the '44' part
+      } else {
+        // For other countries, find country code (up to 3 digits)
+        const match = withoutPlus.match(/^(\d{1,3})(.*)$/);
+        if (match) {
+          countryCode = `+${match[1]}`;
+          cleanPhone = match[2];
+        }
+      }
       
       await saveUserProfile({
         name: name.trim(),
         phone: cleanPhone,
-        countryCode: '+44',
+        countryCode: countryCode,
         initials: getInitials(name.trim()),
         profileCompleted: true
       });
 
-      Alert.alert(
-        'Profile Complete!',
-        'Welcome to SynciT! You can now start creating and joining groups.',
-        [
-          {
-            text: 'Get Started',
-            onPress: () => {
-              // Let AuthNavigator handle navigation automatically
-            }
-          }
-        ]
-      );
+      console.log('Profile setup completed successfully');
     } catch (error) {
       console.error('Profile setup error:', error);
-      Alert.alert(
-        'Profile Setup Failed',
-        'There was an error saving your profile. Please try again.'
-      );
     } finally {
       setLoading(false);
     }
@@ -161,24 +246,20 @@ export default function ProfileSetupScreen() {
             <View style={styles.inputContainer}>
               <Text style={styles.inputLabel}>Phone Number *</Text>
               <Text style={styles.inputDescription}>
-                Used for group invitations and easy contact by group members (UK numbers only)
+                Used for group invitations and easy contact by group members only
               </Text>
-              <TextInput
-                style={styles.phoneInput}
+              <PhoneNumberInput
                 value={phoneNumber}
                 onChangeText={setPhoneNumber}
-                placeholder="Enter your phone number"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="phone-pad"
-                maxLength={14}
               />
+              <View style={styles.phoneWarningContainer}>
+                <Text style={styles.phoneWarningText}>
+                  ⚠️ Please make sure your phone number is correct. Once set, it can’t be changed. To update it, you’ll need to delete your account and sign up again.
+                </Text>
+              </View>
             </View>
 
             <View style={styles.privacyNotice}>
-              <Text style={styles.privacyText}>
-                🔒 Your phone number will only be visible to members of groups you join. 
-                We never share your information with third parties.
-              </Text>
               <Text style={[styles.privacyText, { marginTop: 12 }]}>
                 🔔 Notifications and contacts access help you stay connected with your groups. 
                 These features can be managed in Settings.
@@ -267,25 +348,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#374151',
   },
-  permissionInfo: {
-    backgroundColor: '#F0F9FF',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#BAE6FD',
-  },
-  permissionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0C4A6E',
-    marginBottom: 8,
-  },
-  permissionDescription: {
-    fontSize: 14,
-    color: '#0C4A6E',
-    lineHeight: 20,
-  },
   previewContainer: {
     alignItems: 'center',
     marginBottom: 32,
@@ -339,7 +401,36 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#111827',
   },
-  phoneInput: {
+  phoneInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  prefixContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 52,
+  },
+  fixedPrefix: {
+    fontSize: 16,
+    color: '#9CA3AF',
+    fontWeight: '500',
+  },
+  countryCodeInput: {
+    fontSize: 16,
+    color: '#111827',
+    fontWeight: '500',
+    minWidth: 40,
+    textAlign: 'center',
+    padding: 0,
+  },
+  phoneMainInput: {
+    flex: 1,
     backgroundColor: 'white',
     borderWidth: 1,
     borderColor: '#D1D5DB',
@@ -348,6 +439,21 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     color: '#111827',
+    height: 52,
+  },
+  phoneWarningContainer: {
+    backgroundColor: '#FEF3C7',
+    padding: 15,
+    borderRadius: 8,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  phoneWarningText: {
+    fontSize: 13,
+    color: '#92400E',
+    lineHeight: 18,
+    textAlign: 'center',
   },
   privacyNotice: {
     backgroundColor: '#EFF6FF',
