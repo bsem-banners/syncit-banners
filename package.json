@@ -63,5 +63,9 @@
     "eslint-config-expo": "~9.2.0",
     "typescript": "~5.8.3"
   },
+  "resolutions": {
+    "com.google.firebase:firebase-common": "20.3.3",
+    "com.google.firebase:firebase-firestore": "24.7.1"
+  },
   "private": true
 }
