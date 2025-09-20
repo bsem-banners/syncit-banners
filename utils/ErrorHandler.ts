@@ -1,4 +1,4 @@
-import crashlytics from '@react-native-firebase/crashlytics';
+import * as Sentry from '@sentry/react-native';
 import { LogBox } from 'react-native';
 
 interface ErrorContext {
@@ -16,8 +16,12 @@ export default class ErrorHandler {
   static initialize() {
     if (this.isInitialized) return;
     
-    // Enable crashlytics collection in production only
-    crashlytics().setCrashlyticsCollectionEnabled(!__DEV__);
+    // Initialize Sentry - automatically disabled in development
+    Sentry.init({
+      dsn: process.env.EXPO_PUBLIC_SENTRY_DSN, // Add this to your .env file
+      debug: __DEV__,
+      environment: __DEV__ ? 'development' : 'production',
+    });
     
     if (!__DEV__) {
       LogBox.ignoreAllLogs(true);
@@ -29,25 +33,25 @@ export default class ErrorHandler {
     this.isInitialized = true;
   }
 
-  // Log errors - development console + Crashlytics in production
+  // Log errors - development console + Sentry in production
   static logError(error: Error, context?: ErrorContext) {
-    // Send to Crashlytics in production
+    // Send to Sentry in production
     if (!__DEV__) {
       if (context) {
-        // Set attributes for this error
-        crashlytics().setAttribute('action', context.action || 'unknown');
-        crashlytics().setAttribute('screen', context.screen || 'unknown');
-        crashlytics().setAttribute('userId', context.userId || 'anonymous');
+        // Set tags and context for this error
+        Sentry.setTag('action', context.action || 'unknown');
+        Sentry.setTag('screen', context.screen || 'unknown');
+        Sentry.setTag('userId', context.userId || 'anonymous');
+        
         if (context.groupId) {
-          crashlytics().setAttribute('groupId', context.groupId);
+          Sentry.setTag('groupId', context.groupId);
         }
+        
         if (context.additionalData) {
-          Object.entries(context.additionalData).forEach(([key, value]) => {
-            crashlytics().setAttribute(`data_${key}`, String(value));
-          });
+          Sentry.setContext('additional_data', context.additionalData);
         }
       }
-      crashlytics().recordError(error);
+      Sentry.captureException(error);
     }
     
     // Only show technical details in development
@@ -106,16 +110,15 @@ export default class ErrorHandler {
     return errorMessages[errorCode] || 'Something went wrong. Please try again.';
   }
 
-  // Log events - development console + Crashlytics breadcrumbs in production
+  // Log events - development console + Sentry breadcrumbs in production
   static logEvent(eventName: string, parameters?: Record<string, any>) {
     if (!__DEV__) {
-      // Log as breadcrumb in Crashlytics for context
-      crashlytics().log(`Event: ${eventName}`);
-      if (parameters) {
-        Object.entries(parameters).forEach(([key, value]) => {
-          crashlytics().setAttribute(`event_${key}`, String(value));
-        });
-      }
+      // Add breadcrumb in Sentry for context
+      Sentry.addBreadcrumb({
+        message: eventName,
+        level: 'info',
+        data: parameters,
+      });
     }
     
     if (__DEV__) {
@@ -123,15 +126,13 @@ export default class ErrorHandler {
     }
   }
 
-  // Set user for Crashlytics tracking
+  // Set user for Sentry tracking
   static setUser(userId: string, properties?: Record<string, string>) {
     if (!__DEV__) {
-      crashlytics().setUserId(userId);
-      if (properties) {
-        Object.entries(properties).forEach(([key, value]) => {
-          crashlytics().setAttribute(key, value);
-        });
-      }
+      Sentry.setUser({
+        id: userId,
+        ...properties,
+      });
     }
     
     if (__DEV__) {
@@ -139,13 +140,10 @@ export default class ErrorHandler {
     }
   }
 
-  // Clear user from Crashlytics
+  // Clear user from Sentry
   static clearUser() {
     if (!__DEV__) {
-      crashlytics().setUserId('');
-      // Clear user-specific attributes
-      crashlytics().setAttribute('email', '');
-      crashlytics().setAttribute('emailVerified', '');
+      Sentry.setUser(null);
     }
     
     if (__DEV__) {
@@ -173,7 +171,7 @@ export default class ErrorHandler {
       console.log('Test crash called - this only works in production builds');
       return;
     }
-    crashlytics().crash();
+    Sentry.captureException(new Error('Test crash'));
   }
 
   // Wrapper for async operations with error handling

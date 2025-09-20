@@ -61,9 +61,10 @@ export default {
         }
       ],
       [
-        "@react-native-firebase/crashlytics",
+        "@sentry/react-native/expo",
         {
-          crashlytics_auto_collection_enabled: true
+          project: "syncitmobileapp",
+          organization: "kairom"
         }
       ]
     ],
